@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { pool, initDb } from './db.js';
 import { telegramAuth, getTelegramUser } from './telegram.js';
+import { gameRouter } from './routes.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -13,6 +14,7 @@ app.use(helmet());
 app.use(cors({ origin: (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',').map(s => s.trim()), methods: ['GET','POST'], allowedHeaders: ['content-type','x-telegram-init-data'] }));
 app.use(express.json({ limit: '10kb' }));
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-7', legacyHeaders: false }));
+app.use('/api', gameRouter);
 app.get('/health', async (_req, res) => { try { await pool.query('SELECT 1'); res.json({ ok: true }); } catch { res.status(503).json({ ok: false }); } });
 app.get('/api/me', telegramAuth, async (req, res, next) => {
   try {
