@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Admin from './Admin';
 
 type Profile = { id: string; firstName: string; username?: string; points: number; energy: number; maxEnergy: number; taps: number };
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -11,6 +12,7 @@ async function request(path: string, initData: string, options: RequestInit = {}
   return data;
 }
 export default function App() {
+  if (window.location.pathname === '/admin') return <Admin />;
   const [profile, setProfile] = useState<Profile>({ id: 'demo', firstName: 'Miner', points: 0, energy: 100, maxEnergy: 100, taps: 0 });
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
