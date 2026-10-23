@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { pool } from './db.js';
 import { telegramAuth, getTelegramUser } from './telegram.js';
 
@@ -7,7 +7,7 @@ const MIN_WITHDRAWAL = 100;
 function admins(): Set<string> {
   return new Set((process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean));
 }
-function requireAdmin(req: Parameters<Parameters<typeof gameRouter.get>[1]>[0], res: Parameters<Parameters<typeof gameRouter.get>[1]>[1]): boolean {
+function requireAdmin(req: Request, res: Response): boolean {
   const tg = getTelegramUser(req);
   if (!admins().has(String(tg.id))) { res.status(403).json({ error: 'Admin access required.' }); return false; }
   return true;
