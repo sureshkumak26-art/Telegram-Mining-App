@@ -21,7 +21,7 @@ gameRouter.post('/withdrawals', telegramAuth, async (req, res, next) => {
     const method = typeof req.body?.payoutMethod === 'string' ? req.body.payoutMethod.trim() : '';
     const details = typeof req.body?.payoutDetails === 'string' ? req.body.payoutDetails.trim() : '';
     if (!Number.isSafeInteger(points) || points < MIN_WITHDRAWAL || points > 1_000_000_000) return res.status(400).json({ error: `Minimum withdrawal is ${MIN_WITHDRAWAL} points.` });
-    if (!['UPI'].includes(method.toUpperCase())) return res.status(400).json({ error: 'Supported payout method: UPI.' });
+    return res.status(410).json({ error: 'Points withdrawals are disabled. Use the Hyperliquid crypto wallet instead.' });
     if (details.length < 3 || details.length > 200 || /[<>\u0000-\u001f]/.test(details)) return res.status(400).json({ error: 'Enter valid payout details (3–200 characters).' });
     await client.query('BEGIN');
     const locked = await client.query('SELECT points FROM users WHERE telegram_id=$1 FOR UPDATE', [tg.id]);
