@@ -132,9 +132,9 @@ cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) =>
     const destination = getAddress(destinationRaw);
     await linkedAddress(tg.id);
     await client.query('BEGIN');
-    const balance = await client.query('SELECT balance FROM crypto_balances WHERE telegram_id=$1 AND asset=$2 FOR UPDATE', [tg.id, asset]);
-    if (!balance.rowCount || BigInt(parseUnits(String(balance.rows[0].balance), decimals).toString()) < amount) { await client.query('ROLLBACK'); return res.status(400).json({ error: `Insufficient ${asset} balance.` }); }
     const amountText = formatUnits(amount, decimals);
+    const balance = await client.query('SELECT balance >= $3::numeric AS enough FROM crypto_balances WHERE telegram_id=$1 AND asset=$2 FOR UPDATE', [tg.id, asset, amountText]);
+    if (!balance.rowCount || !balance.rows[0].enough) { await client.query('ROLLBACK'); return res.status(400).json({ error: `Insufficient ${asset} balance.` }); }
     await client.query('UPDATE crypto_balances SET balance=balance-$3 WHERE telegram_id=$1 AND asset=$2', [tg.id, asset, amountText]);
     const created = await client.query('INSERT INTO crypto_withdrawals(telegram_id,asset,amount,destination_address) VALUES($1,$2,$3,$4) RETURNING id,asset,amount,destination_address,status,created_at', [tg.id, asset, amountText, destination]);
     await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [tg.id, asset, '-'+amountText, `withdrawal-request:${created.rows[0].id}`]);
