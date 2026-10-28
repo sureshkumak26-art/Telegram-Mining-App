@@ -38,7 +38,7 @@ gameRouter.post('/withdrawals', telegramAuth, async (req, res, next) => {
 gameRouter.get('/admin/dashboard', telegramAuth, async (req, res, next) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const [stats, users, ledger, withdrawals] = await Promise.all([
+    const [stats, users, ledger, withdrawals, cryptoWithdrawals] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS total_users, COALESCE(SUM(points),0)::numeric(14,2) AS total_points, COALESCE(SUM(taps),0)::bigint AS total_taps, COUNT(*) FILTER (WHERE updated_at > NOW()-INTERVAL '24 hours')::int AS active_24h FROM users`),
       pool.query(`SELECT telegram_id, first_name, username, points, energy, taps, created_at, updated_at FROM users ORDER BY updated_at DESC LIMIT 100`),
       pool.query(`SELECT id, telegram_id, delta, reason, created_at FROM ledger ORDER BY created_at DESC LIMIT 50`),
