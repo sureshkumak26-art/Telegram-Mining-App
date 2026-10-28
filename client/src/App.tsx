@@ -76,6 +76,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!initData || profile.energy !== 0 || !profile.resetAt) return;
+    const refreshProfile = () => {
+      request('/api/me', initData).then(d => setProfile(d.profile)).catch(e => setNotice(e instanceof Error ? e.message : 'Could not refresh energy'));
+    };
+    const remaining = new Date(profile.resetAt).getTime() - Date.now();
+    if (remaining <= 0) { refreshProfile(); return; }
+    const timer = window.setTimeout(refreshProfile, remaining + 100);
+    return () => window.clearTimeout(timer);
+  }, [initData, profile.energy, profile.resetAt]);
+
+  useEffect(() => {
     if (initData || profile.energy !== 0 || !profile.resetAt) return;
     if (new Date(profile.resetAt).getTime() <= now) {
       setProfile(p => ({ ...p, energy: p.maxEnergy, resetAt: null }));
