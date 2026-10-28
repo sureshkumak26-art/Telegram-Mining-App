@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Admin from './Admin';
 
-type Profile = { id: string; firstName: string; username?: string; points: number; energy: number; maxEnergy: number; taps: number };
+type Profile = { id: string; firstName: string; username?: string; points: number; energy: number; maxEnergy: number; taps: number; resetAt?: string | null };
 type Tab = 'refer' | 'tasks' | 'tap' | 'wallet';
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const telegram = (window as any).Telegram?.WebApp;
@@ -49,11 +49,12 @@ export default function App() {
       }
     }
 
-    return { id: 'demo', firstName: 'Miner', points: 0, energy: 100, maxEnergy: 100, taps: 0 };
+    return { id: 'demo', firstName: 'Miner', points: 0, energy: 1000, maxEnergy: 1000, taps: 0, resetAt: null };
   });
   const [tab, setTab] = useState<Tab>('tap');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const [withdrawPoints, setWithdrawPoints] = useState('100');
   const [upi, setUpi] = useState('');
   const [refCopied, setRefCopied] = useState(false);
@@ -70,6 +71,11 @@ export default function App() {
   }, [initData]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     // Local preview progress is separate from authenticated Telegram balances.
     if (initData) return;
     try {
@@ -79,9 +85,18 @@ export default function App() {
     }
   }, [profile, initData]);
 
+  const resetRemaining = profile.resetAt ? Math.max(0, new Date(profile.resetAt).getTime() - now) : 0;
+  const resetCountdown = `${String(Math.floor(resetRemaining / 3600000)).padStart(2, '0')}:${String(Math.floor((resetRemaining % 3600000) / 60000)).padStart(2, '0')}:${String(Math.floor((resetRemaining % 60000) / 1000)).padStart(2, '0')}`;
+
   async function tap() {
     if (busy || profile.energy < 1) return;
-    if (!isTelegram) { setProfile(p => ({ ...p, points: p.points + 1, energy: Math.max(0, p.energy - 1), taps: p.taps + 1 })); return; }
+    if (!isTelegram) {
+      setProfile(p => {
+        const energy = Math.max(0, p.energy - 1);
+        return { ...p, points: Math.round((p.points + 0.02) * 100) / 100, energy, taps: p.taps + 1, resetAt: energy === 0 ? new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString() : p.resetAt };
+      });
+      return;
+    }
     setBusy(true); setNotice('');
     try { const d = await request('/api/tap', initData, { method: 'POST', body: JSON.stringify({ count: 1 }) }); setProfile(d.profile); }
     catch (e) { setNotice(e instanceof Error ? e.message : 'Tap failed'); }
@@ -108,12 +123,13 @@ export default function App() {
     <div className="app-content">
       {tab === 'tap' && <>
         <section className="user-strip"><div className="user-avatar">{(profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><div className="wallet-chip">◈ <span>WALLET<br/><b>{profile.points.toLocaleString()} PTS</b></span> ›</div></section>
-        <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString()} <span>HYPERLIQUID</span></div><div className="balance-sub">Your virtual mining balance</div></section>
-        <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn one point" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div className="tap-plus">+1</div></section>
-        <button className="tap-cta" onClick={tap} disabled={busy || profile.energy < 1}>{busy ? 'MINING…' : '✦  Tap to mine'}</button>
-        <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>ENERGY</small></div><div className="meter"><span>⏳</span><b>{Math.max(0,profile.maxEnergy-profile.energy)} taps</b><small>USED</small></div></section>
+        <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-sub">Your virtual mining balance</div></section>
+        <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.02 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div className="tap-plus">+0.02</div></section>
+        <button className="tap-cta" onClick={tap} disabled={busy || profile.energy < 1}>{busy ? 'MINING…' : profile.energy < 1 ? '⏳  Resetting…' : '✦  Tap to mine'}</button>
+        <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⏳</span><b>{profile.taps.toLocaleString()} taps</b><small>TOTAL TAPS</small></div></section>
+        {profile.energy === 0 && <p className="fine-print">Tap limit reached. Reset in {resetRemaining > 0 ? resetCountdown : '5 hours'}.</p>}
         <div className="energy-track"><div style={{width:`${Math.min(100,profile.energy/Math.max(1,profile.maxEnergy)*100)}%`}}/></div>
-        <p className="fine-print">Points are virtual rewards and have no guaranteed cash value.</p>
+        <p className="fine-print">Each tap earns 0.02 virtual points. 1,000 taps per cycle; full reset after 5 hours. Points have no guaranteed cash value.</p>
       </>}
       {tab === 'refer' && <>
         <h1 className="page-heading">Refer &amp; Earn</h1><p className="page-subtitle">Invite friends and grow together</p>
@@ -129,7 +145,7 @@ export default function App() {
         <p className="task-disclaimer">Task verification and rewards are not active yet. These links do not award points.</p>
       </>}
       {tab === 'wallet' && <>
-        <h1 className="page-heading">Wallet</h1><section className="wallet-balance glass-card"><label>TOTAL BALANCE</label><strong>{profile.points.toLocaleString()} <span>HYPERLIQUID</span></strong><small>Virtual points · no fixed USD value</small></section>
+        <h1 className="page-heading">Wallet</h1><section className="wallet-balance glass-card"><label>TOTAL BALANCE</label><strong>{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></strong><small>Virtual points · no fixed USD value</small></section>
         <button className="withdraw-btn" onClick={() => document.getElementById('withdraw-form')?.scrollIntoView({behavior:'smooth',block:'center'})}>↑ Withdraw points</button>
         <p className="wallet-section-label">Your wallet</p><section className="wallet-option glass-card"><div className="wallet-brand">UPI</div><div><strong>UPI payout</strong><small>India · admin review required</small></div><span>Available</span></section>
         <section id="withdraw-form" className="glass-card withdraw-form"><h3>Request withdrawal</h3><p>Minimum 100 points. Approval does not send money automatically.</p><label htmlFor="withdraw-points">Points to withdraw</label><input id="withdraw-points" type="number" min="100" max={profile.points} value={withdrawPoints} onChange={e=>setWithdrawPoints(e.target.value)}/><label htmlFor="upi-id">UPI ID</label><input id="upi-id" autoComplete="off" placeholder="name@bank" value={upi} onChange={e=>setUpi(e.target.value)}/><button className="blue-btn full-btn" disabled={busy || !upi.trim() || Number(withdrawPoints)<100 || Number(withdrawPoints)>profile.points} onClick={withdraw}>{busy ? 'Submitting…' : 'Submit request'}</button></section>
