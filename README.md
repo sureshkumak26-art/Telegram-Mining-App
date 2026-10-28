@@ -36,7 +36,7 @@ Requirements: Node.js 22+, npm, PostgreSQL, and a Telegram bot created with BotF
 - `GET /health` — database/API health
 - `GET /api/me` — verifies Telegram init data and loads the player profile
 - `POST /api/tap` — awards one point with a row lock and ledger entry
-- `POST /api/withdrawals` — request a withdrawal (minimum 100 points; UPI method)
+- `POST /api/withdrawals` — disabled legacy points/UPI withdrawal endpoint (returns HTTP 410)
 - `GET /api/admin/withdrawals` — list pending withdrawals for configured admins
 - `POST /api/admin/withdrawals/:id/review` — approve or reject; rejection refunds points
 - `GET /api/crypto/summary` — linked wallet, in-app ETH/USDC balances and recent activity
@@ -50,7 +50,7 @@ Authenticated API calls send Telegram WebApp `initData` in the `x-telegram-init-
 
 ## Ethereum wallet setup
 
-The crypto wallet supports **Ethereum Mainnet ETH and USDC** (the USDC contract must be configured explicitly). It provides an external wallet link using a one-time signed message, an internal app balance, on-chain deposit verification, and admin-reviewed withdrawals. It does **not** generate or hold a user's private key. The treasury address is a shared deposit address; only ETH and the exact configured USDC contract are accepted, and deposits must originate from the linked wallet address.
+The crypto wallet supports **Ethereum Mainnet ETH deposits**. USDC deposit verification remains backend-optional and is only enabled when its contract is configured. Withdrawals are Hyperliquid-only ETH requests sent manually to the user's Hyperliquid ETH deposit address. It provides an external wallet link using a one-time signed message, an internal app balance, on-chain deposit verification, and admin-reviewed withdrawals. It does **not** generate or hold a user's private key. The treasury address is a shared deposit address; only ETH and the exact configured USDC contract are accepted, and deposits must originate from the linked wallet address.
 
 Set these variables on the **backend only** before enabling crypto deposits:
 
@@ -61,7 +61,7 @@ ETHEREUM_USDC_CONTRACT=0xYOUR_VERIFIED_MAINNET_USDC_CONTRACT
 ADMIN_TELEGRAM_IDS=YOUR_NUMERIC_TELEGRAM_ID
 ```
 
-Use a trusted Ethereum RPC provider and keep any provider API key private. The app requires 12 confirmations before crediting deposits or marking payout transactions paid. Duplicate transaction hashes are rejected. Withdrawal requests reserve the internal balance; an admin must manually send the transfer from the treasury, then submit its transaction hash for server-side verification. Approving a request does not itself transfer funds.
+Use a trusted Ethereum RPC provider and keep any provider API key private. The app requires 12 confirmations before crediting deposits or marking payout transactions paid. Duplicate transaction hashes are rejected. Hyperliquid ETH withdrawal requests debit the requested amount plus a fixed **0.02 ETH fee** from the user's internal ETH balance. Rejected requests refund both amount and fee. An admin must manually send the ETH transfer on Ethereum Mainnet to the user's Hyperliquid ETH deposit address, then submit its transaction hash for server-side verification. The 0.02 ETH fee is an app-configured charge, not a quote of the actual Ethereum gas cost. Approving a request does not itself transfer funds.
 
 **Production caution:** a shared treasury deposit address is a simple starter flow, not a production custody architecture. Users must send from the wallet linked to their Telegram account; third-party transfers and unsupported tokens are not credited automatically. Before handling meaningful funds, get a security review, use a dedicated monitored treasury, implement reconciliation and incident procedures, and check applicable legal/tax requirements. Never put a treasury private key or signing secret in the frontend.
 
