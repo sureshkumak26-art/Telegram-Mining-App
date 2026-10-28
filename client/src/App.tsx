@@ -76,6 +76,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (initData || profile.energy !== 0 || !profile.resetAt) return;
+    if (new Date(profile.resetAt).getTime() <= now) {
+      setProfile(p => ({ ...p, energy: p.maxEnergy, resetAt: null }));
+    }
+  }, [initData, profile.energy, profile.maxEnergy, profile.resetAt, now]);
+
+  useEffect(() => {
     // Local preview progress is separate from authenticated Telegram balances.
     if (initData) return;
     try {
