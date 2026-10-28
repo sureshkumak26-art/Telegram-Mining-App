@@ -41,7 +41,17 @@ export default function App() {
             'taps' in parsed &&
             typeof parsed.taps === 'number'
           ) {
-            return parsed as Profile;
+            const savedProfile = parsed as Profile;
+            // Migrate preview saves from older builds (100 energy / missing resetAt).
+            const maxEnergy = 1000;
+            const energy = Math.min(maxEnergy, Math.max(0, savedProfile.energy));
+            const resetAt = energy === 0
+              ? (savedProfile.resetAt && Number.isFinite(new Date(savedProfile.resetAt).getTime())
+                  && new Date(savedProfile.resetAt).getTime() > Date.now()
+                  ? savedProfile.resetAt
+                  : new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString())
+              : null;
+            return { ...savedProfile, energy, maxEnergy, resetAt };
           }
         }
       } catch {
