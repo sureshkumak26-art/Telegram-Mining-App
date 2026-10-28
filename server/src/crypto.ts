@@ -6,6 +6,7 @@ import { telegramAuth, getTelegramUser } from './telegram.js';
 
 export const cryptoRouter = Router();
 const CONFIRMATIONS_REQUIRED = 12;
+const HYPERLIQUID_WITHDRAWAL_FEE_ETH = '0.02';
 const ERC20 = new Interface(['event Transfer(address indexed from, address indexed to, uint256 value)']);
 const adminIds = () => new Set((process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean));
 function requireAdmin(req: Request, res: Response) {
@@ -47,7 +48,7 @@ cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
     const balances = await pool.query('SELECT asset, balance FROM crypto_balances WHERE telegram_id=$1 ORDER BY asset', [tg.id]);
     const deposits = await pool.query('SELECT tx_hash, asset, amount, block_number, confirmations, created_at FROM crypto_deposits WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
     const withdrawals = await pool.query('SELECT id, asset, amount, destination_address, status, tx_hash, created_at FROM crypto_withdrawals WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
-    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured: Boolean(c.rpcUrl && c.treasury), treasuryAddress: c.treasury || null, usdcEnabled: Boolean(c.usdc), confirmationsRequired: CONFIRMATIONS_REQUIRED, wallet: wallet.rows[0] ? { address: wallet.rows[0].address, verifiedAt: wallet.rows[0].verified_at } : null, balances: balances.rows.map(b => ({ asset: b.asset, balance: String(b.balance) })), deposits: deposits.rows.map(d => ({ ...d, amount: String(d.amount), txHash: d.tx_hash, blockNumber: String(d.block_number) })), withdrawals: withdrawals.rows.map(w => ({ ...w, amount: String(w.amount), txHash: w.tx_hash })) });
+    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured: Boolean(c.rpcUrl && c.treasury), treasuryAddress: c.treasury || null, usdcEnabled: Boolean(c.usdc), confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, wallet: wallet.rows[0] ? { address: wallet.rows[0].address, verifiedAt: wallet.rows[0].verified_at } : null, balances: balances.rows.map(b => ({ asset: b.asset, balance: String(b.balance) })), deposits: deposits.rows.map(d => ({ ...d, amount: String(d.amount), txHash: d.tx_hash, blockNumber: String(d.block_number) })), withdrawals: withdrawals.rows.map(w => ({ ...w, amount: String(w.amount), txHash: w.tx_hash })) });
   } catch (e) { next(e); }
 });
 cryptoRouter.post('/crypto/challenge', telegramAuth, async (req, res, next) => {
@@ -131,19 +132,24 @@ cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) =>
   const client = await pool.connect();
   try {
     const tg = getTelegramUser(req), asset = req.body?.asset, destinationRaw = req.body?.destination, rawAmount = req.body?.amount;
-    const decimals = assetDecimals(asset), amount = decimalAmount(rawAmount, decimals);
-    if (typeof destinationRaw !== 'string' || !isAddress(destinationRaw)) return res.status(400).json({ error: 'Enter a valid Ethereum destination address.' });
+    if (asset !== 'ETH') return res.status(400).json({ error: 'Hyperliquid withdrawals are currently ETH-only on Ethereum Mainnet.' });
+    const amount = decimalAmount(rawAmount, 18);
+    const fee = parseUnits(HYPERLIQUID_WITHDRAWAL_FEE_ETH, 18);
+    if (amount <= 0n) return res.status(400).json({ error: 'Withdrawal amount must be greater than zero.' });
+    if (typeof destinationRaw !== 'string' || !isAddress(destinationRaw)) return res.status(400).json({ error: 'Enter a valid Hyperliquid ETH deposit address.' });
     const destination = getAddress(destinationRaw);
     await linkedAddress(tg.id);
     await client.query('BEGIN');
-    const amountText = formatUnits(amount, decimals);
-    const balance = await client.query('SELECT balance >= $3::numeric AS enough FROM crypto_balances WHERE telegram_id=$1 AND asset=$2 FOR UPDATE', [tg.id, asset, amountText]);
-    if (!balance.rowCount || !balance.rows[0].enough) { await client.query('ROLLBACK'); return res.status(400).json({ error: `Insufficient ${asset} balance.` }); }
-    await client.query('UPDATE crypto_balances SET balance=balance-$3 WHERE telegram_id=$1 AND asset=$2', [tg.id, asset, amountText]);
-    const created = await client.query('INSERT INTO crypto_withdrawals(telegram_id,asset,amount,destination_address) VALUES($1,$2,$3,$4) RETURNING id,asset,amount,destination_address,status,created_at', [tg.id, asset, amountText, destination]);
-    await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [tg.id, asset, '-'+amountText, `withdrawal-request:${created.rows[0].id}`]);
+    const amountText = formatUnits(amount, 18);
+    const totalDebitText = formatUnits(amount + fee, 18);
+    const balance = await client.query('SELECT balance >= $3::numeric AS enough FROM crypto_balances WHERE telegram_id=$1 AND asset=$2 FOR UPDATE', [tg.id, 'ETH', totalDebitText]);
+    if (!balance.rowCount || !balance.rows[0].enough) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Insufficient ETH balance. Your balance must cover the withdrawal amount plus the 0.02 ETH fee.' }); }
+    await client.query('UPDATE crypto_balances SET balance=balance-$3 WHERE telegram_id=$1 AND asset=$2', [tg.id, 'ETH', totalDebitText]);
+    const created = await client.query('INSERT INTO crypto_withdrawals(telegram_id,asset,amount,destination_address) VALUES($1,$2,$3,$4) RETURNING id,asset,amount,destination_address,status,created_at', [tg.id, 'ETH', amountText, destination]);
+    await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [tg.id, 'ETH', '-'+amountText, `withdrawal-request:${created.rows[0].id}`]);
+    await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [tg.id, 'ETH', '-'+HYPERLIQUID_WITHDRAWAL_FEE_ETH, `hyperliquid-withdrawal-fee:${created.rows[0].id}`]);
     await client.query('COMMIT');
-    res.status(201).json({ withdrawal: { ...created.rows[0], amount: String(created.rows[0].amount) } });
+    res.status(201).json({ withdrawal: { ...created.rows[0], amount: String(created.rows[0].amount), fee: HYPERLIQUID_WITHDRAWAL_FEE_ETH, network: 'Ethereum Mainnet', destination: 'Hyperliquid' } });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (e instanceof Error && /Ethereum|wallet|address|amount|decimal|Supported assets/.test(e.message)) return res.status(400).json({ error: e.message }); next(e); }
   finally { client.release(); }
 });
@@ -166,8 +172,10 @@ cryptoRouter.post('/admin/crypto/withdrawals/:id/review', telegramAuth, async (r
     const w = found.rows[0];
     await client.query('UPDATE crypto_withdrawals SET status=$2, reviewed_by=$3, reviewed_at=NOW() WHERE id=$1', [id, decision, tg.id]);
     if (decision === 'rejected') {
-      await client.query('INSERT INTO crypto_balances(telegram_id,asset,balance) VALUES($1,$2,$3) ON CONFLICT(telegram_id,asset) DO UPDATE SET balance=crypto_balances.balance+EXCLUDED.balance', [w.telegram_id,w.asset,w.amount]);
+      const refundAmount = w.asset === 'ETH' ? (Number(w.amount) + Number(HYPERLIQUID_WITHDRAWAL_FEE_ETH)).toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : String(w.amount);
+      await client.query('INSERT INTO crypto_balances(telegram_id,asset,balance) VALUES($1,$2,$3) ON CONFLICT(telegram_id,asset) DO UPDATE SET balance=crypto_balances.balance+EXCLUDED.balance', [w.telegram_id,w.asset,refundAmount]);
       await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [w.telegram_id,w.asset,w.amount,`withdrawal-refund:${id}`]);
+      if (w.asset === 'ETH') await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [w.telegram_id,'ETH',HYPERLIQUID_WITHDRAWAL_FEE_ETH,`hyperliquid-withdrawal-fee-refund:${id}`]);
     }
     await client.query('COMMIT');
     res.json({ ok: true, id, status: decision });
