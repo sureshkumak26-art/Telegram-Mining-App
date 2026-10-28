@@ -18,22 +18,66 @@ function Icon({ name }: { name: string }) {
 }
 export default function App() {
   if (window.location.pathname === '/admin') return <Admin />;
-  const [profile, setProfile] = useState<Profile>({ id: 'demo', firstName: 'Miner', points: 0, energy: 100, maxEnergy: 100, taps: 0 });
+  const initData = telegram?.initData || '';
+  const [profile, setProfile] = useState<Profile>(() => {
+    if (!initData) {
+      try {
+        const saved = localStorage.getItem('hyperliquid-preview-profile');
+        if (saved) {
+          const parsed: unknown = JSON.parse(saved);
+          if (
+            parsed !== null &&
+            typeof parsed === 'object' &&
+            'id' in parsed &&
+            typeof parsed.id === 'string' &&
+            'firstName' in parsed &&
+            typeof parsed.firstName === 'string' &&
+            'points' in parsed &&
+            typeof parsed.points === 'number' &&
+            'energy' in parsed &&
+            typeof parsed.energy === 'number' &&
+            'maxEnergy' in parsed &&
+            typeof parsed.maxEnergy === 'number' &&
+            'taps' in parsed &&
+            typeof parsed.taps === 'number'
+          ) {
+            return parsed as Profile;
+          }
+        }
+      } catch {
+        // Ignore invalid or unavailable local preview storage.
+      }
+    }
+
+    return { id: 'demo', firstName: 'Miner', points: 0, energy: 100, maxEnergy: 100, taps: 0 };
+  });
   const [tab, setTab] = useState<Tab>('tap');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [withdrawPoints, setWithdrawPoints] = useState('100');
   const [upi, setUpi] = useState('');
   const [refCopied, setRefCopied] = useState(false);
-  const initData = telegram?.initData || '';
   const isTelegram = Boolean(initData);
   const botUsername = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || '';
   const referralLink = botUsername ? `https://t.me/${botUsername}?start=ref_${profile.id}` : '';
 
   useEffect(() => {
-    if (!initData) { setNotice('Preview mode · open this Mini App inside Telegram to save progress.'); return; }
+    if (!initData) {
+      setNotice('Preview mode · progress is saved in this browser only. Open inside Telegram to use your server balance.');
+      return;
+    }
     request('/api/me', initData).then((d) => setProfile(d.profile)).catch((e) => setNotice(e.message));
   }, [initData]);
+
+  useEffect(() => {
+    // Local preview progress is separate from authenticated Telegram balances.
+    if (initData) return;
+    try {
+      localStorage.setItem('hyperliquid-preview-profile', JSON.stringify(profile));
+    } catch {
+      setNotice('This browser could not save preview progress. Check storage settings.');
+    }
+  }, [profile, initData]);
 
   async function tap() {
     if (busy || profile.energy < 1) return;
