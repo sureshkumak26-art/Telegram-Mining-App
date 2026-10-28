@@ -69,6 +69,7 @@ export default function App() {
   const [now, setNow] = useState(Date.now());
   const [withdrawPoints, setWithdrawPoints] = useState('100');
   const [upi, setUpi] = useState('');
+  const [walletMethod, setWalletMethod] = useState<'UPI' | 'Crypto'>('UPI');
   const [refCopied, setRefCopied] = useState(false);
   const isTelegram = Boolean(initData);
   const botUsername = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || '';
@@ -176,11 +177,17 @@ export default function App() {
         <p className="task-disclaimer">Task verification and rewards are not active yet. These links do not award points.</p>
       </>}
       {tab === 'wallet' && <>
-        <CryptoWallet initData={initData} isTelegram={isTelegram} />
         <h1 className="page-heading">Mining Points Wallet</h1><section className="wallet-balance glass-card"><label>TOTAL BALANCE</label><strong>{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></strong><small>Virtual points · no fixed USD value</small></section>
         <button className="withdraw-btn" onClick={() => document.getElementById('withdraw-form')?.scrollIntoView({behavior:'smooth',block:'center'})}>↑ Withdraw points</button>
-        <p className="wallet-section-label">Your wallet</p><section className="wallet-option glass-card"><div className="wallet-brand">UPI</div><div><strong>UPI payout</strong><small>India · admin review required</small></div><span>Available</span></section>
-        <section id="withdraw-form" className="glass-card withdraw-form"><h3>Request withdrawal</h3><p>Minimum 100 points. Approval does not send money automatically.</p><label htmlFor="withdraw-points">Points to withdraw</label><input id="withdraw-points" type="number" min="100" max={profile.points} value={withdrawPoints} onChange={e=>setWithdrawPoints(e.target.value)}/><label htmlFor="upi-id">UPI ID</label><input id="upi-id" autoComplete="off" placeholder="name@bank" value={upi} onChange={e=>setUpi(e.target.value)}/><button className="blue-btn full-btn" disabled={busy || !upi.trim() || Number(withdrawPoints)<100 || Number(withdrawPoints)>profile.points} onClick={withdraw}>{busy ? 'Submitting…' : 'Submit request'}</button></section>
+        <p className="wallet-section-label">Your wallet</p>
+        <div className="wallet-method-tabs" role="tablist" aria-label="Wallet payout method">
+          <button type="button" role="tab" aria-selected={walletMethod === 'UPI'} className={walletMethod === 'UPI' ? 'active' : ''} onClick={() => setWalletMethod('UPI')}>UPI</button>
+          <button type="button" role="tab" aria-selected={walletMethod === 'Crypto'} className={walletMethod === 'Crypto' ? 'active' : ''} onClick={() => setWalletMethod('Crypto')}>Crypto</button>
+        </div>
+        {walletMethod === 'Crypto' ? <CryptoWallet initData={initData} isTelegram={isTelegram} /> : <>
+          <section className="wallet-option glass-card"><div className="wallet-brand">UPI</div><div><strong>UPI payout</strong><small>India · admin review required</small></div><span>Available</span></section>
+          <section id="withdraw-form" className="glass-card withdraw-form"><h3>Request withdrawal</h3><p>Minimum 100 points. Approval does not send money automatically.</p><label htmlFor="withdraw-points">Points to withdraw</label><input id="withdraw-points" type="number" min="100" max={profile.points} value={withdrawPoints} onChange={e=>setWithdrawPoints(e.target.value)}/><label htmlFor="upi-id">UPI ID</label><input id="upi-id" autoComplete="off" placeholder="name@bank" value={upi} onChange={e=>setUpi(e.target.value)}/><button className="blue-btn full-btn" disabled={busy || !upi.trim() || Number(withdrawPoints)<100 || Number(withdrawPoints)>profile.points} onClick={withdraw}>{busy ? 'Submitting…' : 'Submit request'}</button></section>
+        </>}
       </>}
       {notice && <div className="notice" role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss">×</button></div>}
     </div>
