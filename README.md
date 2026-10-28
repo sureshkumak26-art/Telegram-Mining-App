@@ -72,7 +72,7 @@ Use a trusted Ethereum RPC provider and keep any provider API key private. The a
 - Points changes and withdrawal decisions use database transactions and are written to the ledger.
 - Use HTTPS, a strong database password, explicit CORS origins, backups, monitoring, and a least-privilege database account in production.
 - Review the local laws and your own published reward/withdrawal terms before offering real payouts.
-- The task cards are UI placeholders; task verification, referrals, automated energy regeneration, and a standalone admin web dashboard are not implemented yet. Do not advertise those features as live.
+- The task cards are UI placeholders; task verification, referrals, and automated energy regeneration are not implemented yet. Do not advertise those features as live.
 
 ## License
 
