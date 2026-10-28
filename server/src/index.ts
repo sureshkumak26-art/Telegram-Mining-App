@@ -19,8 +19,12 @@ app.get('/health', async (_req, res) => { try { await pool.query('SELECT 1'); re
 app.get('/api/me', telegramAuth, async (req, res, next) => {
   try {
     const tg = getTelegramUser(req);
-    const result = await pool.query(`INSERT INTO users(telegram_id, first_name, username) VALUES($1,$2,$3) ON CONFLICT(telegram_id) DO UPDATE SET first_name=EXCLUDED.first_name, username=EXCLUDED.username, updated_at=NOW() RETURNING telegram_id, first_name, username, points, energy, taps`, [tg.id, tg.first_name.slice(0,100), tg.username?.slice(0,100) || null]);
-    res.json({ profile: toProfile(result.rows[0]) });
+    const result = await pool.query(`INSERT INTO users(telegram_id, first_name, username) VALUES($1,$2,$3) ON CONFLICT(telegram_id) DO UPDATE SET first_name=EXCLUDED.first_name, username=EXCLUDED.username, updated_at=NOW() RETURNING telegram_id`, [tg.id, tg.first_name.slice(0,100), tg.username?.slice(0,100) || null]);
+    // Repair legacy depleted accounts that have no reset timestamp, otherwise the UI stays at 00:00:00 forever.
+    await pool.query(`UPDATE users SET energy_reset_at=NOW()+INTERVAL '5 hours', updated_at=NOW() WHERE telegram_id=$1 AND energy=0 AND energy_reset_at IS NULL`, [tg.id]);
+    await pool.query(`UPDATE users SET energy=1000, energy_reset_at=NULL, updated_at=NOW() WHERE telegram_id=$1 AND energy=0 AND energy_reset_at IS NOT NULL AND energy_reset_at<=NOW()`, [tg.id]);
+    const profile = await pool.query(`SELECT telegram_id, first_name, username, points, energy, taps, energy_reset_at FROM users WHERE telegram_id=$1`, [tg.id]);
+    res.json({ profile: toProfile(profile.rows[0]) });
   } catch (e) { next(e); }
 });
 app.post('/api/tap', telegramAuth, async (req, res, next) => {
@@ -31,16 +35,20 @@ app.post('/api/tap', telegramAuth, async (req, res, next) => {
     if (!Number.isInteger(count) || count < 1 || count > 1) return res.status(400).json({ error: 'Tap count must be 1.' });
     await client.query('BEGIN');
     await client.query('INSERT INTO users(telegram_id, first_name, username) VALUES($1,$2,$3) ON CONFLICT(telegram_id) DO NOTHING', [tg.id, tg.first_name.slice(0,100), tg.username?.slice(0,100) || null]);
-    const locked = await client.query('SELECT telegram_id, first_name, username, points, energy, taps FROM users WHERE telegram_id=$1 FOR UPDATE', [tg.id]);
-    const u = locked.rows[0];
-    if (Number(u.energy) < 1) { await client.query('ROLLBACK'); return res.status(429).json({ error: 'No energy left. Come back later.' }); }
-    const updated = await client.query('UPDATE users SET points=points+1, energy=energy-1, taps=taps+1, updated_at=NOW() WHERE telegram_id=$1 RETURNING telegram_id, first_name, username, points, energy, taps', [tg.id]);
-    await client.query('INSERT INTO ledger(telegram_id, delta, reason) VALUES($1,1,$2)', [tg.id, 'tap']);
+    const locked = await client.query('SELECT telegram_id, first_name, username, points, energy, taps, energy_reset_at FROM users WHERE telegram_id=$1 FOR UPDATE', [tg.id]);
+    let u = locked.rows[0];
+    if (Number(u.energy) === 0 && u.energy_reset_at && new Date(u.energy_reset_at).getTime() <= Date.now()) {
+      const reset = await client.query('UPDATE users SET energy=1000, energy_reset_at=NULL WHERE telegram_id=$1 RETURNING telegram_id, first_name, username, points, energy, taps, energy_reset_at', [tg.id]);
+      u = reset.rows[0];
+    }
+    if (Number(u.energy) < 1) { await client.query('ROLLBACK'); return res.status(429).json({ error: 'No taps left. Your 5-hour reset is still running.', resetAt: u.energy_reset_at }); }
+    const updated = await client.query(`UPDATE users SET points=points+0.02, energy=energy-1, taps=taps+1, energy_reset_at=CASE WHEN energy=1 THEN NOW()+INTERVAL '5 hours' ELSE energy_reset_at END, updated_at=NOW() WHERE telegram_id=$1 RETURNING telegram_id, first_name, username, points, energy, taps, energy_reset_at`, [tg.id]);
+    await client.query('INSERT INTO ledger(telegram_id, delta, reason) VALUES($1,0.02,$2)', [tg.id, 'tap']);
     await client.query('COMMIT');
     res.json({ profile: toProfile(updated.rows[0]) });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); next(e); }
   finally { client.release(); }
 });
-function toProfile(r: any) { return { id: String(r.telegram_id), firstName: r.first_name, username: r.username || undefined, points: Number(r.points), energy: Number(r.energy), maxEnergy: 100, taps: Number(r.taps) }; }
+function toProfile(r: any) { return { id: String(r.telegram_id), firstName: r.first_name, username: r.username || undefined, points: Number(r.points), energy: Number(r.energy), maxEnergy: 1000, taps: Number(r.taps), resetAt: r.energy_reset_at ? new Date(r.energy_reset_at).toISOString() : null }; }
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => { console.error(err); res.status(500).json({ error: 'Internal server error' }); });
 initDb().then(() => app.listen(port, '0.0.0.0', () => console.log(`Mining API listening on ${port}`))).catch(err => { console.error('Database initialization failed', err); process.exit(1); });
