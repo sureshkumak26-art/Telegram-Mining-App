@@ -86,6 +86,7 @@ cryptoRouter.post('/crypto/deposits/verify', telegramAuth, async (req, res, next
     const tg = getTelegramUser(req), asset = req.body?.asset;
     const hash = typeof req.body?.txHash === 'string' ? req.body.txHash.trim() : '';
     if (!validHash(hash)) return res.status(400).json({ error: 'Enter a valid Ethereum transaction hash.' });
+    if (!['ETH','USDC'].includes(asset)) return res.status(400).json({ error: 'Supported assets are ETH and USDC on Ethereum mainnet.' });
     const decimals = assetDecimals(asset);
     const sender = await linkedAddress(tg.id), c = config();
     if (asset === 'USDC' && !c.usdc) return res.status(503).json({ error: 'USDC deposits are not configured on this backend.' });
@@ -140,7 +141,7 @@ cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) =>
     await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [tg.id, asset, '-'+amountText, `withdrawal-request:${created.rows[0].id}`]);
     await client.query('COMMIT');
     res.status(201).json({ withdrawal: { ...created.rows[0], amount: String(created.rows[0].amount) } });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (e instanceof Error && /Ethereum|wallet|address|amount|Supported assets/.test(e.message)) return res.status(400).json({ error: e.message }); next(e); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (e instanceof Error && /Ethereum|wallet|address|amount|decimal|Supported assets/.test(e.message)) return res.status(400).json({ error: e.message }); next(e); }
   finally { client.release(); }
 });
 cryptoRouter.get('/admin/crypto/withdrawals', telegramAuth, async (req, res, next) => {
