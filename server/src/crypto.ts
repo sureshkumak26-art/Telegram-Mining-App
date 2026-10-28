@@ -44,11 +44,17 @@ async function linkedAddress(telegramId: number) {
 cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
   try {
     const tg = getTelegramUser(req), c = config();
+    let ethereumConfigured = false;
+    let configurationMessage = 'Set ETHEREUM_RPC_URL and ETHEREUM_TREASURY_ADDRESS on the backend.';
+    if (c.rpcUrl && c.treasury) {
+      try { const p = await provider(); ethereumConfigured = true; configurationMessage = ''; await p.destroy(); }
+      catch (error) { configurationMessage = error instanceof Error ? error.message : 'Ethereum Mainnet RPC validation failed.'; }
+    }
     const wallet = await pool.query('SELECT address, verified_at FROM crypto_wallet_links WHERE telegram_id=$1', [tg.id]);
     const balances = await pool.query('SELECT asset, balance FROM crypto_balances WHERE telegram_id=$1 ORDER BY asset', [tg.id]);
     const deposits = await pool.query('SELECT tx_hash, asset, amount, block_number, confirmations, created_at FROM crypto_deposits WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
     const withdrawals = await pool.query('SELECT id, asset, amount, destination_address, status, tx_hash, created_at FROM crypto_withdrawals WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
-    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured: Boolean(c.rpcUrl && c.treasury), treasuryAddress: c.treasury || null, usdcEnabled: Boolean(c.usdc), confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, wallet: wallet.rows[0] ? { address: wallet.rows[0].address, verifiedAt: wallet.rows[0].verified_at } : null, balances: balances.rows.map(b => ({ asset: b.asset, balance: String(b.balance) })), deposits: deposits.rows.map(d => ({ ...d, amount: String(d.amount), txHash: d.tx_hash, blockNumber: String(d.block_number) })), withdrawals: withdrawals.rows.map(w => ({ ...w, amount: String(w.amount), txHash: w.tx_hash })) });
+    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured: ethereumConfigured, configurationMessage, treasuryAddress: ethereumConfigured ? c.treasury : null, usdcEnabled: Boolean(c.usdc), confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, wallet: wallet.rows[0] ? { address: wallet.rows[0].address, verifiedAt: wallet.rows[0].verified_at } : null, balances: balances.rows.map(b => ({ asset: b.asset, balance: String(b.balance) })), deposits: deposits.rows.map(d => ({ ...d, amount: String(d.amount), txHash: d.tx_hash, blockNumber: String(d.block_number) })), withdrawals: withdrawals.rows.map(w => ({ ...w, amount: String(w.amount), txHash: w.tx_hash })) });
   } catch (e) { next(e); }
 });
 cryptoRouter.post('/crypto/challenge', telegramAuth, async (req, res, next) => {
@@ -172,7 +178,7 @@ cryptoRouter.post('/admin/crypto/withdrawals/:id/review', telegramAuth, async (r
     const w = found.rows[0];
     await client.query('UPDATE crypto_withdrawals SET status=$2, reviewed_by=$3, reviewed_at=NOW() WHERE id=$1', [id, decision, tg.id]);
     if (decision === 'rejected') {
-      const refundAmount = w.asset === 'ETH' ? (Number(w.amount) + Number(HYPERLIQUID_WITHDRAWAL_FEE_ETH)).toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : String(w.amount);
+      const refundAmount = w.asset === 'ETH' ? formatUnits(parseUnits(String(w.amount), 18) + parseUnits(HYPERLIQUID_WITHDRAWAL_FEE_ETH, 18), 18) : String(w.amount);
       await client.query('INSERT INTO crypto_balances(telegram_id,asset,balance) VALUES($1,$2,$3) ON CONFLICT(telegram_id,asset) DO UPDATE SET balance=crypto_balances.balance+EXCLUDED.balance', [w.telegram_id,w.asset,refundAmount]);
       await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [w.telegram_id,w.asset,w.amount,`withdrawal-refund:${id}`]);
       if (w.asset === 'ETH') await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [w.telegram_id,'ETH',HYPERLIQUID_WITHDRAWAL_FEE_ETH,`hyperliquid-withdrawal-fee-refund:${id}`]);
