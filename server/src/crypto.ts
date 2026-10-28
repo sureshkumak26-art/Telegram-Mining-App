@@ -48,7 +48,7 @@ cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
     let configurationMessage = 'Set ETHEREUM_RPC_URL and ETHEREUM_TREASURY_ADDRESS on the backend.';
     if (c.rpcUrl && c.treasury) {
       try { const p = await provider(); ethereumConfigured = true; configurationMessage = ''; await p.destroy(); }
-      catch (error) { configurationMessage = error instanceof Error ? error.message : 'Ethereum Mainnet RPC validation failed.'; }
+      catch { configurationMessage = 'Ethereum Mainnet RPC or treasury configuration could not be validated. Check the backend environment and RPC endpoint.'; }
     }
     const wallet = await pool.query('SELECT address, verified_at FROM crypto_wallet_links WHERE telegram_id=$1', [tg.id]);
     const balances = await pool.query('SELECT asset, balance FROM crypto_balances WHERE telegram_id=$1 ORDER BY asset', [tg.id]);
