@@ -20,6 +20,8 @@ app.get('/api/me', telegramAuth, async (req, res, next) => {
   try {
     const tg = getTelegramUser(req);
     const result = await pool.query(`INSERT INTO users(telegram_id, first_name, username) VALUES($1,$2,$3) ON CONFLICT(telegram_id) DO UPDATE SET first_name=EXCLUDED.first_name, username=EXCLUDED.username, updated_at=NOW() RETURNING telegram_id`, [tg.id, tg.first_name.slice(0,100), tg.username?.slice(0,100) || null]);
+    // Repair legacy depleted accounts that have no reset timestamp, otherwise the UI stays at 00:00:00 forever.
+    await pool.query(`UPDATE users SET energy_reset_at=NOW()+INTERVAL '5 hours', updated_at=NOW() WHERE telegram_id=$1 AND energy=0 AND energy_reset_at IS NULL`, [tg.id]);
     await pool.query(`UPDATE users SET energy=1000, energy_reset_at=NULL, updated_at=NOW() WHERE telegram_id=$1 AND energy=0 AND energy_reset_at IS NOT NULL AND energy_reset_at<=NOW()`, [tg.id]);
     const profile = await pool.query(`SELECT telegram_id, first_name, username, points, energy, taps, energy_reset_at FROM users WHERE telegram_id=$1`, [tg.id]);
     res.json({ profile: toProfile(profile.rows[0]) });
