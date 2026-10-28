@@ -156,7 +156,7 @@ cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) =>
     await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [tg.id, 'ETH', '-'+HYPERLIQUID_WITHDRAWAL_FEE_ETH, `hyperliquid-withdrawal-fee:${created.rows[0].id}`]);
     await client.query('COMMIT');
     res.status(201).json({ withdrawal: { ...created.rows[0], amount: String(created.rows[0].amount), fee: HYPERLIQUID_WITHDRAWAL_FEE_ETH, network: 'Ethereum Mainnet', destination: 'Hyperliquid' } });
-  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (e instanceof Error && /Ethereum|wallet|address|amount|decimal|Supported assets/.test(e.message)) return res.status(400).json({ error: e.message }); next(e); }
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (e instanceof Error && /Ethereum|wallet|address|amount|decimal|Supported assets|Hyperliquid withdrawals/.test(e.message)) return res.status(400).json({ error: e.message }); next(e); }
   finally { client.release(); }
 });
 cryptoRouter.get('/admin/crypto/withdrawals', telegramAuth, async (req, res, next) => {
