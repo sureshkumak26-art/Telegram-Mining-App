@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
-import { Contract, Interface, JsonRpcProvider, formatUnits, getAddress, isAddress, parseUnits, verifyMessage } from 'ethers';
+import { Interface, JsonRpcProvider, formatUnits, getAddress, isAddress, parseUnits, verifyMessage } from 'ethers';
 import { pool } from './db.js';
 import { telegramAuth, getTelegramUser } from './telegram.js';
 
@@ -19,10 +19,13 @@ function config() {
   const usdc = isAddress(usdcRaw) ? getAddress(usdcRaw) : '';
   return { treasury, usdc, rpcUrl: process.env.ETHEREUM_RPC_URL || '' };
 }
-function provider() {
+async function provider() {
   const c = config();
   if (!c.rpcUrl || !c.treasury) throw new Error('Ethereum deposits are not configured. Set ETHEREUM_RPC_URL and ETHEREUM_TREASURY_ADDRESS on the backend.');
-  return new JsonRpcProvider(c.rpcUrl, 1, { staticNetwork: true });
+  const p = new JsonRpcProvider(c.rpcUrl);
+  const network = await p.getNetwork();
+  if (network.chainId !== 1n) { await p.destroy(); throw new Error('Configured Ethereum RPC endpoint is not Ethereum Mainnet (chain ID 1).'); }
+  return p;
 }
 function validHash(value: unknown): value is string { return typeof value === 'string' && /^0x[a-fA-F0-9]{64}$/.test(value); }
 function decimalAmount(value: unknown, decimals: number) {
@@ -90,7 +93,7 @@ cryptoRouter.post('/crypto/deposits/verify', telegramAuth, async (req, res, next
     const decimals = assetDecimals(asset);
     const sender = await linkedAddress(tg.id), c = config();
     if (asset === 'USDC' && !c.usdc) return res.status(503).json({ error: 'USDC deposits are not configured on this backend.' });
-    const p = provider();
+    const p = await provider();
     const tx = await p.getTransaction(hash);
     const receipt = await p.getTransactionReceipt(hash);
     if (!tx || !receipt) return res.status(409).json({ error: 'Transaction not found or not mined yet. Try again after it is included in a block.' });
@@ -178,7 +181,7 @@ cryptoRouter.post('/admin/crypto/withdrawals/:id/paid', telegramAuth, async (req
     if (!Number.isSafeInteger(id) || id <= 0 || !validHash(hash)) return res.status(400).json({ error: 'Provide a valid withdrawal ID and Ethereum transaction hash.' });
     const r = await pool.query('SELECT * FROM crypto_withdrawals WHERE id=$1', [id]);
     if (!r.rowCount || r.rows[0].status !== 'approved') return res.status(409).json({ error: 'Approve the request before marking it paid.' });
-    const w = r.rows[0], c = config(), p = provider();
+    const w = r.rows[0], c = config(), p = await provider();
     const tx = await p.getTransaction(hash), receipt = await p.getTransactionReceipt(hash);
     if (!tx || !receipt || receipt.status !== 1) return res.status(409).json({ error: 'Payout transaction is missing or failed.' });
     const confirmations = await p.getBlockNumber() - receipt.blockNumber + 1;
