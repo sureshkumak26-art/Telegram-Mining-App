@@ -64,6 +64,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('tap');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tapAnimation, setTapAnimation] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [withdrawPoints, setWithdrawPoints] = useState('100');
   const [upi, setUpi] = useState('');
@@ -118,6 +119,7 @@ export default function App() {
 
   async function tap() {
     if (busy || profile.energy < 1) return;
+    setTapAnimation(n => n + 1);
     if (!isTelegram) {
       setProfile(p => {
         const energy = Math.max(0, p.energy - 1);
@@ -152,7 +154,7 @@ export default function App() {
       {tab === 'tap' && <>
         <section className="user-strip"><div className="user-avatar">{(profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><div className="wallet-chip">◈ <span>WALLET<br/><b>{profile.points.toLocaleString()} PTS</b></span> ›</div></section>
         <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-sub">Your virtual mining balance</div></section>
-        <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.02 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div className="tap-plus">+0.02</div></section>
+        <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.02 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.02</div></section>
         <button className="tap-cta" onClick={tap} disabled={busy || profile.energy < 1}>{busy ? 'MINING…' : profile.energy < 1 ? '⏳  Resetting…' : '✦  Tap to mine'}</button>
         <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⌛</span><b>{profile.energy === 0 ? resetCountdown : 'READY'}</b><small>RESET TIMER (H:M:S)</small></div></section>
         {profile.energy === 0 && <p className="fine-print">Tap limit reached. Energy refills when the countdown reaches 00:00:00.</p>}
