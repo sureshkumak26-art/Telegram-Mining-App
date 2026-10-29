@@ -48,6 +48,18 @@ Requirements: Node.js 22+, npm, PostgreSQL, and a Telegram bot created with BotF
 
 Authenticated API calls send Telegram WebApp `initData` in the `x-telegram-init-data` header. Do not trust user IDs supplied in request bodies. Admin IDs are comma-separated numeric Telegram IDs in `ADMIN_TELEGRAM_IDS`.
 
+## Admin panel setup
+
+The admin dashboard is served by the same frontend at `/admin` (for example, `https://YOUR-MINI-APP-DOMAIN/admin`). Open it from inside Telegram so the backend receives valid Telegram Mini App authentication data. Admin authorization is enforced by the API; hiding the URL is not a security control.
+
+1. Find your numeric Telegram user ID using a trusted Telegram ID bot.
+2. On the backend host, set `ADMIN_TELEGRAM_IDS` to your numeric ID. For multiple admins, use comma-separated numeric IDs (no @ usernames).
+3. Set `TELEGRAM_BOT_TOKEN`, `DATABASE_URL`, `CLIENT_ORIGIN`, and the Ethereum backend variables below in the server environment. Never place these secrets in `client/.env`, frontend code, or a public repository.
+4. Restart/redeploy the API, then reopen `/admin` inside Telegram. If you see “Admin access required”, verify the exact numeric ID and that the deployed API received the new environment variable.
+5. In the dashboard, review users and the points ledger. Crypto withdrawals appear in the crypto withdrawal queue: reject to refund, or approve to authorize a manual payout. After sending from the treasury, submit the outgoing Ethereum transaction hash so the API can verify it.
+
+The admin dashboard does not collect or store a treasury private key and does not automatically sign or broadcast payouts. Protect the hosting account and database, use HTTPS, and never share the admin URL as a substitute for authorization. Do not use real funds until the deposit and payout paths have been tested with small amounts and reviewed.
+
 ## Ethereum wallet setup
 
 The crypto wallet supports **Ethereum Mainnet ETH deposits**. USDC deposit verification remains backend-optional and is only enabled when its contract is configured. Withdrawals are Hyperliquid-only ETH requests sent manually to the user's Hyperliquid ETH deposit address. It provides an external wallet link using a one-time signed message, an internal app balance, on-chain deposit verification, and admin-reviewed withdrawals. It does **not** generate or hold a user's private key. The treasury address is a shared deposit address; only ETH and the exact configured USDC contract are accepted, and deposits must originate from the linked wallet address.
