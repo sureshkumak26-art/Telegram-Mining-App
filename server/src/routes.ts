@@ -21,7 +21,7 @@ gameRouter.post('/withdrawals', telegramAuth, async (req, res, next) => {
     const method = typeof req.body?.payoutMethod === 'string' ? req.body.payoutMethod.trim() : '';
     const details = typeof req.body?.payoutDetails === 'string' ? req.body.payoutDetails.trim() : '';
     if (!Number.isSafeInteger(points) || points < MIN_WITHDRAWAL || points > 1_000_000_000) return res.status(400).json({ error: `Minimum withdrawal is ${MIN_WITHDRAWAL} points.` });
-    if (!['UPI'].includes(method.toUpperCase())) return res.status(400).json({ error: 'Supported payout method: UPI.' });
+    return res.status(410).json({ error: 'Points withdrawals are disabled. Use the Hyperliquid crypto wallet instead.' });
     if (details.length < 3 || details.length > 200 || /[<>\u0000-\u001f]/.test(details)) return res.status(400).json({ error: 'Enter valid payout details (3–200 characters).' });
     await client.query('BEGIN');
     const locked = await client.query('SELECT points FROM users WHERE telegram_id=$1 FOR UPDATE', [tg.id]);
@@ -38,18 +38,20 @@ gameRouter.post('/withdrawals', telegramAuth, async (req, res, next) => {
 gameRouter.get('/admin/dashboard', telegramAuth, async (req, res, next) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const [stats, users, ledger, withdrawals] = await Promise.all([
+    const [stats, users, ledger, withdrawals, cryptoWithdrawals] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS total_users, COALESCE(SUM(points),0)::numeric(14,2) AS total_points, COALESCE(SUM(taps),0)::bigint AS total_taps, COUNT(*) FILTER (WHERE updated_at > NOW()-INTERVAL '24 hours')::int AS active_24h FROM users`),
       pool.query(`SELECT telegram_id, first_name, username, points, energy, taps, created_at, updated_at FROM users ORDER BY updated_at DESC LIMIT 100`),
       pool.query(`SELECT id, telegram_id, delta, reason, created_at FROM ledger ORDER BY created_at DESC LIMIT 50`),
-      pool.query(`SELECT id, telegram_id, points, payout_method, payout_details, status, created_at FROM withdrawals WHERE status='pending' ORDER BY created_at ASC LIMIT 100`)
+      pool.query(`SELECT id, telegram_id, points, payout_method, payout_details, status, created_at FROM withdrawals WHERE status='pending' ORDER BY created_at ASC LIMIT 100`),
+      pool.query(`SELECT id, telegram_id, asset, amount, destination_address, status, tx_hash, created_at FROM crypto_withdrawals WHERE status IN ('pending','approved') ORDER BY created_at ASC LIMIT 100`)
     ]);
     const s = stats.rows[0];
     res.json({
       stats: { totalUsers: Number(s.total_users), totalPoints: Number(s.total_points), totalTaps: Number(s.total_taps), active24h: Number(s.active_24h), pendingWithdrawals: withdrawals.rowCount || 0 },
       users: users.rows.map(u => ({ ...u, telegram_id: String(u.telegram_id), points: Number(u.points), taps: Number(u.taps), energy: Number(u.energy) })),
       ledger: ledger.rows.map(l => ({ ...l, telegram_id: String(l.telegram_id), delta: Number(l.delta) })),
-      withdrawals: withdrawals.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), points: Number(w.points) }))
+      withdrawals: withdrawals.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), points: Number(w.points) })),
+      cryptoWithdrawals: cryptoWithdrawals.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), amount: String(w.amount), txHash: w.tx_hash }))
     });
   } catch (e) { next(e); }
 });

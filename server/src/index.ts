@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { pool, initDb } from './db.js';
 import { telegramAuth, getTelegramUser } from './telegram.js';
 import { gameRouter } from './routes.js';
+import { cryptoRouter } from './crypto.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -15,6 +16,7 @@ app.use(cors({ origin: (process.env.CLIENT_ORIGIN || 'http://localhost:5173').sp
 app.use(express.json({ limit: '10kb' }));
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-7', legacyHeaders: false }));
 app.use('/api', gameRouter);
+app.use('/api', cryptoRouter);
 app.get('/health', async (_req, res) => { try { await pool.query('SELECT 1'); res.json({ ok: true }); } catch { res.status(503).json({ ok: false }); } });
 app.get('/api/me', telegramAuth, async (req, res, next) => {
   try {
@@ -32,7 +34,7 @@ app.post('/api/tap', telegramAuth, async (req, res, next) => {
   try {
     const tg = getTelegramUser(req);
     const count = Number(req.body?.count ?? 1);
-    if (!Number.isInteger(count) || count < 1 || count > 1) return res.status(400).json({ error: 'Tap count must be 1.' });
+    if (!Number.isInteger(count) || count < 1 || count > 50) return res.status(400).json({ error: 'Tap batch must contain between 1 and 50 taps.' });
     await client.query('BEGIN');
     await client.query('INSERT INTO users(telegram_id, first_name, username) VALUES($1,$2,$3) ON CONFLICT(telegram_id) DO NOTHING', [tg.id, tg.first_name.slice(0,100), tg.username?.slice(0,100) || null]);
     const locked = await client.query('SELECT telegram_id, first_name, username, points, energy, taps, energy_reset_at FROM users WHERE telegram_id=$1 FOR UPDATE', [tg.id]);
@@ -42,10 +44,12 @@ app.post('/api/tap', telegramAuth, async (req, res, next) => {
       u = reset.rows[0];
     }
     if (Number(u.energy) < 1) { await client.query('ROLLBACK'); return res.status(429).json({ error: 'No taps left. Your 5-hour reset is still running.', resetAt: u.energy_reset_at }); }
-    const updated = await client.query(`UPDATE users SET points=points+0.02, energy=energy-1, taps=taps+1, energy_reset_at=CASE WHEN energy=1 THEN NOW()+INTERVAL '5 hours' ELSE energy_reset_at END, updated_at=NOW() WHERE telegram_id=$1 RETURNING telegram_id, first_name, username, points, energy, taps, energy_reset_at`, [tg.id]);
-    await client.query('INSERT INTO ledger(telegram_id, delta, reason) VALUES($1,0.02,$2)', [tg.id, 'tap']);
+    const acceptedCount = Math.min(count, Number(u.energy));
+    const earned = (acceptedCount * 0.02).toFixed(2);
+    const updated = await client.query(`UPDATE users SET points=points+$2::numeric, energy=energy-$3, taps=taps+$3, energy_reset_at=CASE WHEN energy <= $3 THEN NOW()+INTERVAL '5 hours' ELSE energy_reset_at END, updated_at=NOW() WHERE telegram_id=$1 RETURNING telegram_id, first_name, username, points, energy, taps, energy_reset_at`, [tg.id, earned, acceptedCount]);
+    await client.query('INSERT INTO ledger(telegram_id, delta, reason) VALUES($1,$2,$3)', [tg.id, earned, `tap-batch:${acceptedCount}`]);
     await client.query('COMMIT');
-    res.json({ profile: toProfile(updated.rows[0]) });
+    res.json({ profile: toProfile(updated.rows[0]), acceptedCount });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); next(e); }
   finally { client.release(); }
 });

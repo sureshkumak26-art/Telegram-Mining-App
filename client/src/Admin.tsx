@@ -6,7 +6,8 @@ type Tab = 'overview' | 'users' | 'withdrawals' | 'ledger';
 type Withdrawal = { id: number; telegram_id: string; points: number; payout_method: string; payout_details: string; status: string; created_at: string };
 type User = { telegram_id: string; first_name: string; username?: string; points: number; energy: number; taps: number; created_at: string; updated_at: string };
 type Ledger = { id: number; telegram_id: string; delta: number; reason: string; created_at: string };
-type Dashboard = { stats: { totalUsers: number; totalPoints: number; totalTaps: number; active24h: number; pendingWithdrawals: number }; users: User[]; ledger: Ledger[]; withdrawals: Withdrawal[] };
+type CryptoWithdrawal = { id: number; telegram_id: string; asset: string; amount: string; destination_address: string; status: string; txHash: string | null; created_at: string };
+type Dashboard = { cryptoWithdrawals: CryptoWithdrawal[]; stats: { totalUsers: number; totalPoints: number; totalTaps: number; active24h: number; pendingWithdrawals: number }; users: User[]; ledger: Ledger[]; withdrawals: Withdrawal[] };
 async function api(path: string, method = 'GET', body?: unknown) {
   const response = await fetch(`${API}${path}`, { method, headers: { 'content-type': 'application/json', 'x-telegram-init-data': tg?.initData || '' }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
@@ -29,6 +30,21 @@ export default function Admin() {
     finally { setLoading(false); }
   }
   useEffect(() => { void refresh(); }, []);
+  async function reviewCrypto(id: number, decision: 'approved' | 'rejected') {
+    if (!window.confirm((decision === 'approved' ? 'Approve' : 'Reject and refund') + ' crypto withdrawal #' + id + '?')) return;
+    setWorking(id); setError('');
+    try { await api('/api/admin/crypto/withdrawals/' + id + '/review', 'POST', { decision }); await refresh(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Crypto withdrawal review failed'); }
+    finally { setWorking(null); }
+  }
+  async function markCryptoPaid(id: number) {
+    const txHash = window.prompt('Enter the outgoing Ethereum transaction hash. The server will verify it on-chain.');
+    if (!txHash) return;
+    setWorking(id); setError('');
+    try { await api('/api/admin/crypto/withdrawals/' + id + '/paid', 'POST', { txHash: txHash.trim() }); await refresh(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not verify payout transaction'); }
+    finally { setWorking(null); }
+  }
   async function review(id: number, decision: 'approved' | 'rejected') {
     if (!window.confirm(`${decision === 'approved' ? 'Approve' : 'Reject and refund'} withdrawal #${id}?`)) return;
     setWorking(id); setError('');
@@ -72,6 +88,9 @@ export default function Admin() {
             </div>
             <div className="admin-section-head"><div><h3>Pending withdrawals</h3><p>Review requests before manually paying.</p></div><button onClick={() => setTab('withdrawals')}>View all →</button></div>
             {dashboard.withdrawals.length === 0 ? <div className="admin-empty">No pending withdrawals.</div> : dashboard.withdrawals.slice(0,4).map(item => <WithdrawalCard key={item.id} item={item} working={working === item.id} onReview={review}/>)}
+            <div className="admin-section-head"><div><h3>Crypto withdrawals</h3><p>Approve or reject requests; record a verified payout transaction after sending it.</p></div><span className="admin-count">{dashboard.cryptoWithdrawals.length} open</span></div>
+            {dashboard.cryptoWithdrawals.length === 0 ? <div className="admin-empty">No pending crypto withdrawals.</div> : dashboard.cryptoWithdrawals.map(item => <article className="admin-withdrawal" key={'crypto-'+item.id}><div className="admin-withdrawal-top"><div><span>CRYPTO REQUEST #{item.id} · TELEGRAM {item.telegram_id}</span><h3>{item.amount} {item.asset}</h3></div><b className="admin-pending">{item.status.toUpperCase()}</b></div><div className="admin-withdrawal-grid"><div className="admin-payout"><small>DESTINATION</small><b>{item.destination_address}</b></div><div><small>REQUESTED</small><b>{new Date(item.created_at).toLocaleString()}</b></div></div><div className="admin-review-actions">{item.status === 'pending' ? <><button disabled={working === item.id} className="admin-reject" onClick={() => void reviewCrypto(item.id,'rejected')}>Reject & refund</button><button disabled={working === item.id} className="admin-approve" onClick={() => void reviewCrypto(item.id,'approved')}>Approve request</button></> : <button disabled={working === item.id} className="admin-approve" onClick={() => void markCryptoPaid(item.id)}>{working === item.id ? 'Verifying…' : 'Record payout tx hash'}</button>}</div></article>)}
+            <p className="admin-warning">Crypto approvals do not send funds automatically. After manually sending a payout from your treasury, submit its transaction hash; the backend verifies the Ethereum receipt, destination and amount.</p>
             <div className="admin-section-head"><div><h3>Recent activity</h3><p>Latest points ledger entries.</p></div><button onClick={() => setTab('ledger')}>Open ledger →</button></div>
             <LedgerTable entries={dashboard.ledger.slice(0,6)}/>
           </>}
