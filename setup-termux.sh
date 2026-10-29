@@ -90,7 +90,7 @@ if command -v cloudflared >/dev/null 2>&1; then
     TUNNEL_PID=$!
     trap 'kill "$TUNNEL_PID" 2>/dev/null || true' EXIT INT TERM
     sleep 5
-    TUNNEL_URL="$(grep -Eo 'https://[-a-zA-Z0-9]+\\.trycloudflare\\.com' "$ROOT/.cloudflared.log" | head -n 1 || true)"
+    TUNNEL_URL="$(grep -Eo 'https://[-a-zA-Z0-9]+\.trycloudflare\.com' "$ROOT/.cloudflared.log" | head -n 1 || true)"
     if [ -n "$TUNNEL_URL" ]; then
       echo
       echo "Temporary HTTPS URL: $TUNNEL_URL"
