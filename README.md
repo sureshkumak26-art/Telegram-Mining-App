@@ -12,6 +12,22 @@ A Telegram Mini App starter for a points-based tap-to-earn experience. Includes 
 - **Authentication:** Telegram Mini Apps `initData` signature verification using the bot token
 - **CI:** GitHub Actions
 
+## Automatic setup on Android Termux
+
+For a guided local setup on Android, install Git and clone the branch, then run the setup script:
+
+```bash
+pkg update -y
+pkg install -y git
+git clone --branch feature/ethereum-wallet https://github.com/sureshkumak26-art/Telegram-Mining-App.git
+cd Telegram-Mining-App
+bash setup-termux.sh
+```
+
+The script installs Node.js and PostgreSQL, initializes a local database if needed, prompts for bot/admin/RPC settings without echoing the bot token, writes the private `.env` file, runs type checks and production builds, and starts the development servers. If `cloudflared` is already installed, it offers an optional temporary public HTTPS tunnel. You must still set the returned URL as the Mini App URL in BotFather. A quick tunnel is temporary and intended only for testing, not production.
+
+The script never asks for or stores a treasury private key. Leave the RPC URL and treasury address blank to configure deposits later. Do not use real funds until wallet and payout flows have been tested and reviewed.
+
 ## Local setup
 
 Requirements: Node.js 22+, npm, PostgreSQL, and a Telegram bot created with BotFather.
