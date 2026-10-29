@@ -4,7 +4,7 @@ import CryptoWallet from './CryptoWallet';
 
 type Profile = { id: string; firstName: string; username?: string; points: number; energy: number; maxEnergy: number; taps: number; resetAt?: string | null };
 type Tab = 'refer' | 'tasks' | 'tap' | 'wallet';
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API = import.meta.env.VITE_API_URL || '';
 const telegram = (window as any).Telegram?.WebApp;
 
 async function request(path: string, initData: string, options: RequestInit = {}) {
