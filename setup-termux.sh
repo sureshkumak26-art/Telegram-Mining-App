@@ -45,16 +45,10 @@ fi
 set_env() {
   local key="$1" value="$2" tmp
   tmp="$(mktemp)"
-  if grep -qE "^(${key})=" .env; then
-    awk -v k="$key" -v v="$value" 'BEGIN{FS=OFS="="} $1==k {$0=k "=" v; found=1} {print} END{if(!found) print k "=" v}' .env > "$tmp"
-  else
-    printf '\n%s=%s\n' "$key" "$value" >> "$tmp"
-    cp .env "$tmp"
-  fi
+  awk -v k="$key" -v v="$value" 'BEGIN{FS="="} $1==k {print k "=" v; found=1; next} {print} END{if(!found) print k "=" v}' .env > "$tmp"
   cat "$tmp" > .env
   rm -f "$tmp"
 }
-
 set_env DATABASE_URL "postgresql://$DB_USER@localhost:5432/mining_app"
 set_env NODE_ENV development
 set_env PORT 3001
