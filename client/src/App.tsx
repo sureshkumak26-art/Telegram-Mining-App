@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Admin from './Admin';
 import CryptoWallet from './CryptoWallet';
 
@@ -65,6 +65,10 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('tap');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const pendingTaps = useRef(0);
+  const tapTimer = useRef<number | null>(null);
+  const tapInFlight = useRef(false);
+  const visibleEnergy = useRef(profile.energy);
   const [tapAnimation, setTapAnimation] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [refCopied, setRefCopied] = useState(false);
@@ -116,20 +120,57 @@ export default function App() {
   const resetRemaining = profile.resetAt ? Math.max(0, new Date(profile.resetAt).getTime() - now) : 0;
   const resetCountdown = `${String(Math.floor(resetRemaining / 3600000)).padStart(2, '0')}:${String(Math.floor((resetRemaining % 3600000) / 60000)).padStart(2, '0')}:${String(Math.floor((resetRemaining % 60000) / 1000)).padStart(2, '0')}`;
 
-  async function tap() {
-    if (busy || profile.energy < 1) return;
-    setTapAnimation(n => n + 1);
-    if (!isTelegram) {
+  async function flushTapQueue() {
+    if (!isTelegram || tapInFlight.current || pendingTaps.current < 1) return;
+    if (tapTimer.current !== null) { window.clearTimeout(tapTimer.current); tapTimer.current = null; }
+    tapInFlight.current = true;
+    setBusy(true);
+    const count = Math.min(50, pendingTaps.current);
+    pendingTaps.current -= count;
+    try {
+      const d = await request('/api/tap', initData, { method: 'POST', body: JSON.stringify({ count }) });
+      const accepted = Number(d.acceptedCount ?? count);
+      const rejected = count - accepted;
+      if (rejected > 0) {
+        pendingTaps.current = Math.max(0, pendingTaps.current - rejected);
+        visibleEnergy.current = Math.min(1000, visibleEnergy.current + rejected);
+      }
+      const stillQueued = pendingTaps.current;
+      const energy = Math.max(0, Number(d.profile.energy) - stillQueued);
+      const resetAt = energy === 0 ? (d.profile.resetAt || new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : d.profile.resetAt;
+      const nextProfile = { ...d.profile, points: Math.round((Number(d.profile.points) + stillQueued * 0.02) * 100) / 100, energy, taps: Number(d.profile.taps) + stillQueued, resetAt };
+      visibleEnergy.current = energy;
+      setProfile(nextProfile);
+    } catch (e) {
+      // Roll back only the batch that failed; taps queued while it was in flight remain visible.
       setProfile(p => {
-        const energy = Math.max(0, p.energy - 1);
-        return { ...p, points: Math.round((p.points + 0.02) * 100) / 100, energy, taps: p.taps + 1, resetAt: energy === 0 ? new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString() : p.resetAt };
+        const energy = Math.min(p.maxEnergy, p.energy + count);
+        visibleEnergy.current = Math.min(p.maxEnergy, visibleEnergy.current + count);
+        return { ...p, points: Math.max(0, Math.round((p.points - count * 0.02) * 100) / 100), energy, taps: Math.max(0, p.taps - count), resetAt: energy > 0 ? null : p.resetAt };
       });
-      return;
+      setNotice(e instanceof Error ? e.message : 'Tap failed. Please try again.');
+    } finally {
+      tapInFlight.current = false;
+      setBusy(false);
+      if (pendingTaps.current > 0) void flushTapQueue();
     }
-    setBusy(true); setNotice('');
-    try { const d = await request('/api/tap', initData, { method: 'POST', body: JSON.stringify({ count: 1 }) }); setProfile(d.profile); }
-    catch (e) { setNotice(e instanceof Error ? e.message : 'Tap failed'); }
-    finally { setBusy(false); }
+  }
+
+  function tap() {
+    if (visibleEnergy.current < 1) return;
+    visibleEnergy.current -= 1;
+    pendingTaps.current += 1;
+    setTapAnimation(n => n + 1);
+    setProfile(p => {
+      if (p.energy < 1) return p;
+      const energy = Math.max(0, p.energy - 1);
+      return { ...p, points: Math.round((p.points + 0.02) * 100) / 100, energy, taps: p.taps + 1, resetAt: energy === 0 ? (p.resetAt && new Date(p.resetAt).getTime() > Date.now() ? p.resetAt : new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : p.resetAt };
+    });
+    if (!isTelegram) return;
+    setNotice('');
+    if (tapTimer.current === null && !tapInFlight.current) {
+      tapTimer.current = window.setTimeout(() => { tapTimer.current = null; void flushTapQueue(); }, 80);
+    }
   }
   async function copyReferral() {
     if (!referralLink) { setNotice('Set VITE_TELEGRAM_BOT_USERNAME in the frontend environment to enable your referral link.'); return; }
@@ -144,7 +185,7 @@ export default function App() {
         <section className="user-strip"><div className="user-avatar">{(profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><div className="wallet-chip">◈ <span>WALLET<br/><b>{profile.points.toLocaleString()} PTS</b></span> ›</div></section>
         <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-sub">Your virtual mining balance</div></section>
         <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.02 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.02</div></section>
-        <button className="tap-cta" onClick={tap} disabled={busy || profile.energy < 1}>{busy ? 'MINING…' : profile.energy < 1 ? '⏳  Resetting…' : '✦  Tap to mine'}</button>
+        <button className="tap-cta" onClick={tap} disabled={profile.energy < 1}>{profile.energy < 1 ? '⏳  Resetting…' : busy ? '✦  Tap to mine · syncing' : '✦  Tap to mine'}</button>
         <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⌛</span><b>{profile.energy === 0 ? resetCountdown : 'READY'}</b><small>RESET TIMER (H:M:S)</small></div></section>
         {profile.energy === 0 && <p className="fine-print">Tap limit reached. Energy refills when the countdown reaches 00:00:00.</p>}
         <div className="energy-track"><div style={{width:`${Math.min(100,profile.energy/Math.max(1,profile.maxEnergy)*100)}%`}}/></div>
