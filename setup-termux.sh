@@ -78,9 +78,31 @@ echo "Building frontend and backend..."
 npm run build
 
 echo
-echo "Setup complete. Starting API and frontend..."
+echo "Setup complete."
 echo "Local app: http://localhost:5173"
 echo "Admin panel: http://localhost:5173/admin (inside Telegram for authenticated admin access)"
 echo "API health: http://localhost:3001/health"
+
+if command -v cloudflared >/dev/null 2>&1; then
+  read -r -p "Start a temporary PUBLIC HTTPS tunnel for Telegram testing? (y/N): " TUNNEL_CHOICE
+  if [[ "$TUNNEL_CHOICE" =~ ^[Yy]$ ]]; then
+    cloudflared tunnel --url http://localhost:5173 --no-autoupdate > "$ROOT/.cloudflared.log" 2>&1 &
+    TUNNEL_PID=$!
+    trap 'kill "$TUNNEL_PID" 2>/dev/null || true' EXIT INT TERM
+    sleep 5
+    TUNNEL_URL="$(grep -Eo 'https://[-a-zA-Z0-9]+\\.trycloudflare\\.com' "$ROOT/.cloudflared.log" | head -n 1 || true)"
+    if [ -n "$TUNNEL_URL" ]; then
+      echo
+      echo "Temporary HTTPS URL: $TUNNEL_URL"
+      echo "Set this URL as your bot's Mini App URL in BotFather."
+      echo "This URL changes when the tunnel restarts; testing only, not production."
+    else
+      echo "Tunnel URL not detected. Check $ROOT/.cloudflared.log"
+    fi
+  fi
+else
+  echo "cloudflared is not installed. Local testing is ready; install cloudflared separately if you need a temporary HTTPS URL."
+fi
+
 echo "Stop with Ctrl+C. Keep this Termux session open."
 npm run dev
