@@ -4,3 +4,34 @@
 @media(min-width:600px){.app-content{padding-top:30px}.telegram-bar{height:80px}.coin-stage{height:440px}}
 @media(max-width:380px){.app-content{padding-left:18px;padding-right:18px}.tg-title{font-size:19px}.wallet-chip{padding:7px;font-size:18px}.task-card{gap:9px;padding:13px 10px}.task-logo{width:52px;height:52px}.task-details strong{font-size:13px}.start-btn{padding:11px 12px}.referral-stats small{font-size:9px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+
+/* Wallet popup inspired by the supplied reference */
+.wallet-chip{font-family:Inter,sans-serif;cursor:pointer;border:1px solid #28282f;background:transparent}
+.balance-number{font-size:clamp(24px,6vw,46px);letter-spacing:-1.2px;white-space:normal;overflow-wrap:anywhere;line-height:1.12}
+.balance-number span{font-size:.78em;overflow-wrap:anywhere}
+.wallet-overlay{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.78);display:flex;align-items:flex-end;justify-content:center;padding-top:24px}
+.wallet-modal{width:min(100%,690px);max-height:88vh;overflow-y:auto;background:#020405;border:2px solid rgba(79,210,192,.48);border-bottom:0;border-radius:28px 28px 0 0;padding:26px 22px calc(28px + env(safe-area-inset-bottom));box-shadow:0 -12px 45px rgba(79,210,192,.12)}
+.wallet-modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
+.wallet-modal-head h2{font-size:27px;margin:0;font-weight:800}
+.wallet-close{width:54px;height:54px;border:0;border-radius:50%;background:#242333;color:#999;font-size:34px;font-weight:300}
+.wallet-user{display:flex;align-items:center;gap:14px;margin-bottom:24px}
+.wallet-user-avatar{width:76px;height:76px;border-radius:50%;background:#242333;color:#4FD2C0;display:grid;place-items:center;font-size:32px;font-weight:800}
+.wallet-user>div:last-child{display:flex;flex-direction:column;gap:4px}
+.wallet-user strong{font-size:22px}.wallet-user small{font-size:15px;color:#858994}.wallet-user b{font-size:15px;color:#45d98a}
+.eth-balance{border:1px solid var(--line);border-radius:24px;padding:30px 12px;text-align:center;background:linear-gradient(140deg,#0a1c22,#05090d);display:flex;flex-direction:column;gap:13px}
+.eth-balance label{font-size:12px;letter-spacing:3px;color:#90949b;font-weight:700}
+.eth-balance strong{font-size:clamp(34px,9vw,52px);font-weight:800;letter-spacing:-1px}.eth-balance strong span{color:#a18bff;font-size:.8em}
+.eth-balance small{font-size:19px;color:#50d99b}
+.wallet-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:26px 0 34px}
+.wallet-actions button{min-height:122px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(145deg,#0a171d,#05090d);color:#fff;font:700 15px Inter,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.wallet-actions button span{font-size:36px;font-weight:400}
+.assets-title{font-size:18px;color:#858991;margin:0 0 18px}
+.asset-row{display:flex;align-items:center;gap:14px;padding:18px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(140deg,#0a171d,#05090d)}
+.eth-icon{width:60px;height:60px;border-radius:50%;background:#25233e;color:#aaa5ff;display:grid;place-items:center;font-size:38px}
+.asset-row>div:nth-child(2){display:flex;flex-direction:column;gap:5px;flex:1}.asset-row strong{font-size:18px}.asset-row small{font-size:13px;color:#858991}
+.asset-value{text-align:right;display:flex;flex-direction:column;gap:6px}.asset-value small{color:#50d99b}
+.wallet-action-detail{margin-top:26px;padding:22px;border:1px solid var(--line);border-radius:20px;background:#071015}
+.back-wallet{border:0;background:transparent;color:var(--mint);font:600 14px Inter,sans-serif;padding:0;margin-bottom:20px}
+.wallet-action-detail h3{font-size:22px;margin:0 0 12px}.wallet-action-detail p{font-size:14px;line-height:1.7;color:#a0a5ab;margin:0}
+@media(max-width:380px){.wallet-modal{padding-left:16px;padding-right:16px}.wallet-actions{gap:8px}.wallet-actions button{min-height:108px;font-size:13px}.eth-balance{padding:25px 8px}}
