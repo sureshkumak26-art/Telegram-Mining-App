@@ -1,27 +1,32 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { Interface, JsonRpcProvider, formatUnits, getAddress, isAddress, parseUnits, verifyMessage } from 'ethers';
-import { pool } from './db.js';
-import { telegramAuth, getTelegramUser } from './telegram.js';
+import { getSetting, pool } from './db.js';
+import { adminAuth, telegramAuth, getTelegramUser } from './telegram.js';
 
 export const cryptoRouter = Router();
 const CONFIRMATIONS_REQUIRED = 12;
 const HYPERLIQUID_WITHDRAWAL_FEE_ETH = '0.02';
+function minimumWithdrawalEth() {
+  const value = process.env.MIN_ETH_WITHDRAWAL_ETH || '0.02';
+  return /^(?:0|[1-9]\d{0,11})(?:\.\d{1,18})?$/.test(value) && Number(value) > 0 ? value : '0.02';
+}
 const ERC20 = new Interface(['event Transfer(address indexed from, address indexed to, uint256 value)']);
 const adminIds = () => new Set((process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean));
 function requireAdmin(req: Request, res: Response) {
   if (!adminIds().has(String(getTelegramUser(req).id))) { res.status(403).json({ error: 'Admin access required.' }); return false; }
   return true;
 }
-function config() {
-  const treasuryRaw = process.env.ETHEREUM_TREASURY_ADDRESS || '';
+async function config() {
+  const savedAddress = await getSetting('ethereum_deposit_address');
+  const treasuryRaw = savedAddress || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS || '';
   const treasury = isAddress(treasuryRaw) ? getAddress(treasuryRaw) : '';
   const usdcRaw = process.env.ETHEREUM_USDC_CONTRACT || '';
   const usdc = isAddress(usdcRaw) ? getAddress(usdcRaw) : '';
   return { treasury, usdc, rpcUrl: process.env.ETHEREUM_RPC_URL || '' };
 }
 async function provider() {
-  const c = config();
+  const c = await config();
   if (!c.rpcUrl || !c.treasury) throw new Error('Ethereum deposits are not configured. Set ETHEREUM_RPC_URL and ETHEREUM_TREASURY_ADDRESS on the backend.');
   const p = new JsonRpcProvider(c.rpcUrl);
   const network = await p.getNetwork();
@@ -41,20 +46,29 @@ async function linkedAddress(telegramId: number) {
   if (!result.rowCount) throw new Error('Connect and verify your Ethereum wallet first.');
   return getAddress(result.rows[0].address as string);
 }
+cryptoRouter.get('/crypto/public-config', async (_req, res, next) => {
+  try {
+    const c = await config();
+    const qrDataUrl = await getSetting('ethereum_deposit_qr');
+    const configured = Boolean(c.rpcUrl && c.treasury);
+    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured, configurationMessage: configured ? '' : 'RPC is required only for transaction verification.', treasuryAddress: c.treasury || null, qrDataUrl: qrDataUrl || null, usdcEnabled: false, confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, minimumWithdrawalEth: minimumWithdrawalEth(), wallet: null, balances: [], deposits: [], withdrawals: [] });
+  } catch (e) { next(e); }
+});
 cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
   try {
-    const tg = getTelegramUser(req), c = config();
+    const tg = getTelegramUser(req), c = await config();
+    const qrDataUrl = await getSetting('ethereum_deposit_qr');
     let ethereumConfigured = false;
-    let configurationMessage = 'Set ETHEREUM_RPC_URL and ETHEREUM_TREASURY_ADDRESS on the backend.';
+    let configurationMessage = 'Blockchain verification is not configured. Set ETHEREUM_RPC_URL on the backend.';
     if (c.rpcUrl && c.treasury) {
       try { const p = await provider(); ethereumConfigured = true; configurationMessage = ''; await p.destroy(); }
-      catch { configurationMessage = 'Ethereum Mainnet RPC or treasury configuration could not be validated. Check the backend environment and RPC endpoint.'; }
+      catch { configurationMessage = 'Deposit address is available, but blockchain verification requires a valid Ethereum RPC endpoint.'; }
     }
     const wallet = await pool.query('SELECT address, verified_at FROM crypto_wallet_links WHERE telegram_id=$1', [tg.id]);
     const balances = await pool.query('SELECT asset, balance FROM crypto_balances WHERE telegram_id=$1 ORDER BY asset', [tg.id]);
     const deposits = await pool.query('SELECT tx_hash, asset, amount, block_number, confirmations, created_at FROM crypto_deposits WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
     const withdrawals = await pool.query('SELECT id, asset, amount, destination_address, status, tx_hash, created_at FROM crypto_withdrawals WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
-    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured: ethereumConfigured, configurationMessage, treasuryAddress: ethereumConfigured ? c.treasury : null, usdcEnabled: Boolean(c.usdc), confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, wallet: wallet.rows[0] ? { address: wallet.rows[0].address, verifiedAt: wallet.rows[0].verified_at } : null, balances: balances.rows.map(b => ({ asset: b.asset, balance: String(b.balance) })), deposits: deposits.rows.map(d => ({ ...d, amount: String(d.amount), txHash: d.tx_hash, blockNumber: String(d.block_number) })), withdrawals: withdrawals.rows.map(w => ({ ...w, amount: String(w.amount), txHash: w.tx_hash })) });
+    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured: ethereumConfigured, configurationMessage, treasuryAddress: c.treasury || null, qrDataUrl: qrDataUrl || null, usdcEnabled: Boolean(c.usdc), confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, minimumWithdrawalEth: minimumWithdrawalEth(), wallet: wallet.rows[0] ? { address: wallet.rows[0].address, verifiedAt: wallet.rows[0].verified_at } : null, balances: balances.rows.map(b => ({ asset: b.asset, balance: String(b.balance) })), deposits: deposits.rows.map(d => ({ ...d, amount: String(d.amount), txHash: d.tx_hash, blockNumber: String(d.block_number) })), withdrawals: withdrawals.rows.map(w => ({ ...w, amount: String(w.amount), txHash: w.tx_hash })) });
   } catch (e) { next(e); }
 });
 cryptoRouter.post('/crypto/challenge', telegramAuth, async (req, res, next) => {
@@ -98,7 +112,7 @@ cryptoRouter.post('/crypto/deposits/verify', telegramAuth, async (req, res, next
     if (!validHash(hash)) return res.status(400).json({ error: 'Enter a valid Ethereum transaction hash.' });
     if (!['ETH','USDC'].includes(asset)) return res.status(400).json({ error: 'Supported assets are ETH and USDC on Ethereum mainnet.' });
     const decimals = assetDecimals(asset);
-    const sender = await linkedAddress(tg.id), c = config();
+    const sender = await linkedAddress(tg.id), c = await config();
     if (asset === 'USDC' && !c.usdc) return res.status(503).json({ error: 'USDC deposits are not configured on this backend.' });
     const p = await provider();
     const tx = await p.getTransaction(hash);
@@ -142,9 +156,9 @@ cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) =>
     const amount = decimalAmount(rawAmount, 18);
     const fee = parseUnits(HYPERLIQUID_WITHDRAWAL_FEE_ETH, 18);
     if (amount <= 0n) return res.status(400).json({ error: 'Withdrawal amount must be greater than zero.' });
+    if (amount < parseUnits(minimumWithdrawalEth(), 18)) return res.status(400).json({ error: `Minimum withdrawal is ${minimumWithdrawalEth()} ETH.` });
     if (typeof destinationRaw !== 'string' || !isAddress(destinationRaw)) return res.status(400).json({ error: 'Enter a valid Hyperliquid ETH deposit address.' });
     const destination = getAddress(destinationRaw);
-    await linkedAddress(tg.id);
     await client.query('BEGIN');
     const amountText = formatUnits(amount, 18);
     const totalDebitText = formatUnits(amount + fee, 18);
@@ -159,14 +173,14 @@ cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) =>
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); if (e instanceof Error && /Ethereum|wallet|address|amount|decimal|Supported assets|Hyperliquid withdrawals/.test(e.message)) return res.status(400).json({ error: e.message }); next(e); }
   finally { client.release(); }
 });
-cryptoRouter.get('/admin/crypto/withdrawals', telegramAuth, async (req, res, next) => {
+cryptoRouter.get('/admin/crypto/withdrawals', adminAuth, async (req, res, next) => {
   try {
     if (!requireAdmin(req,res)) return;
     const r = await pool.query(`SELECT id,telegram_id,asset,amount,destination_address,status,tx_hash,created_at FROM crypto_withdrawals WHERE status IN ('pending','approved') ORDER BY created_at ASC LIMIT 100`);
-    res.json({ withdrawals: r.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), amount: String(w.amount) })) });
+    res.json({ withdrawals: r.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), amount: String(w.amount), fee: w.asset === 'ETH' ? HYPERLIQUID_WITHDRAWAL_FEE_ETH : '0' })) });
   } catch (e) { next(e); }
 });
-cryptoRouter.post('/admin/crypto/withdrawals/:id/review', telegramAuth, async (req, res, next) => {
+cryptoRouter.post('/admin/crypto/withdrawals/:id/review', adminAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     if (!requireAdmin(req,res)) return;
@@ -188,14 +202,14 @@ cryptoRouter.post('/admin/crypto/withdrawals/:id/review', telegramAuth, async (r
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); next(e); }
   finally { client.release(); }
 });
-cryptoRouter.post('/admin/crypto/withdrawals/:id/paid', telegramAuth, async (req, res, next) => {
+cryptoRouter.post('/admin/crypto/withdrawals/:id/paid', adminAuth, async (req, res, next) => {
   try {
     if (!requireAdmin(req,res)) return;
     const id = Number(req.params.id), hash = typeof req.body?.txHash === 'string' ? req.body.txHash.trim() : '';
     if (!Number.isSafeInteger(id) || id <= 0 || !validHash(hash)) return res.status(400).json({ error: 'Provide a valid withdrawal ID and Ethereum transaction hash.' });
     const r = await pool.query('SELECT * FROM crypto_withdrawals WHERE id=$1', [id]);
-    if (!r.rowCount || r.rows[0].status !== 'approved') return res.status(409).json({ error: 'Approve the request before marking it paid.' });
-    const w = r.rows[0], c = config(), p = await provider();
+    if (!r.rowCount || r.rows[0].status !== 'approved') return res.status(409).json({ error: 'Approve the request before marking it completed.' });
+    const w = r.rows[0], c = await config(), p = await provider();
     const tx = await p.getTransaction(hash), receipt = await p.getTransactionReceipt(hash);
     if (!tx || !receipt || receipt.status !== 1) return res.status(409).json({ error: 'Payout transaction is missing or failed.' });
     const confirmations = await p.getBlockNumber() - receipt.blockNumber + 1;
@@ -208,9 +222,9 @@ cryptoRouter.post('/admin/crypto/withdrawals/:id/paid', telegramAuth, async (req
       }
     }
     if (!valid) return res.status(400).json({ error: 'Transaction does not match the treasury, asset, destination and requested amount.' });
-    const updated = await pool.query(`UPDATE crypto_withdrawals SET status='paid', tx_hash=$2, reviewed_at=NOW() WHERE id=$1 AND status='approved' RETURNING id`, [id, hash.toLowerCase()]);
+    const updated = await pool.query(`UPDATE crypto_withdrawals SET status='completed', tx_hash=$2, reviewed_at=NOW() WHERE id=$1 AND status='approved' RETURNING id`, [id, hash.toLowerCase()]);
     if (!updated.rowCount) return res.status(409).json({ error: 'Withdrawal was updated by another admin.' });
-    await pool.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason,tx_hash) VALUES($1,$2,0,$3,$4)', [w.telegram_id,w.asset,`withdrawal-paid:${id}`,hash.toLowerCase()]);
-    res.json({ ok: true, id, status: 'paid', txHash: hash });
+    await pool.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason,tx_hash) VALUES($1,$2,0,$3,$4)', [w.telegram_id,w.asset,`withdrawal-completed:${id}`,hash.toLowerCase()]);
+    res.json({ ok: true, id, status: 'completed', txHash: hash });
   } catch (e) { next(e); }
 });

@@ -45,14 +45,14 @@ Requirements: Node.js 22+, npm, PostgreSQL, and a Telegram bot created with BotF
    npm run dev
    ```
    Frontend: `http://localhost:5173`; API health check: `http://localhost:3001/health`. The API creates its required tables on startup.
-5. Configure your Telegram bot's Mini App URL in BotFather and use an HTTPS URL for deployment. Set `VITE_API_URL` at frontend build time to your deployed API origin if it differs from the local default.
+5. Set `TELEGRAM_WEB_APP_URL` to the HTTPS frontend URL. On backend startup, the app registers `/start` and `/help` commands and configures the bot chat-menu Web App button. Set `VITE_API_URL` at frontend build time only when the API is hosted on a different origin; otherwise same-origin `/api` routing is used.
 
 ## API overview
 
 - `GET /health` — database/API health
 - `GET /api/me` — verifies Telegram init data and loads the player profile
 - `POST /api/tap` — awards one point with a row lock and ledger entry
-- `POST /api/withdrawals` — disabled legacy points/UPI withdrawal endpoint (returns HTTP 410)
+- `POST /api/withdrawals` — disabled legacy points withdrawal endpoint (returns HTTP 410; no legacy payout is created)
 - `GET /api/admin/withdrawals` — list pending withdrawals for configured admins
 - `POST /api/admin/withdrawals/:id/review` — approve or reject; rejection refunds points
 - `GET /api/crypto/summary` — linked wallet, in-app ETH/USDC balances and recent activity
@@ -100,7 +100,7 @@ Use a trusted Ethereum RPC provider and keep any provider API key private. The a
 - Points changes and withdrawal decisions use database transactions and are written to the ledger.
 - Use HTTPS, a strong database password, explicit CORS origins, backups, monitoring, and a least-privilege database account in production.
 - Review the local laws and your own published reward/withdrawal terms before offering real payouts.
-- The task cards are UI placeholders; task verification, referrals, and automated energy regeneration are not implemented yet. Do not advertise those features as live.
+- The task cards are UI placeholders; task verification, referral rewards, and automated energy regeneration are not implemented yet. Do not advertise those features as live.
 
 ## License
 
