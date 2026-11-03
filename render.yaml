@@ -1,0 +1,59 @@
+databases:
+  - name: telegram-miner-db
+    plan: free
+    databaseName: mining_app
+    user: mining_app
+
+services:
+  - type: web
+    name: telegram-miner-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: telegram-miner-db
+          property: connectionString
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
+      - key: TELEGRAM_WEB_APP_URL
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        sync: false
+      - key: ETHEREUM_RPC_URL
+        sync: false
+      - key: ETHEREUM_DEPOSIT_ADDRESS
+        sync: false
+      - key: ETHEREUM_USDC_CONTRACT
+        sync: false
+      - key: MIN_ETH_WITHDRAWAL_ETH
+        value: '0.02'
+      - key: REFERRAL_REWARD_POINTS
+        value: '10'
+      - key: ALLOW_LOCAL_ADMIN
+        value: 'false'
+
+  - type: web
+    name: telegram-miner-web
+    runtime: static
+    plan: free
+    rootDir: client
+    buildCommand: npm install --include=dev && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_TELEGRAM_BOT_USERNAME
+        sync: false
