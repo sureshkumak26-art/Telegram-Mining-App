@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { verifyAdminSession } from './adminSession.js';
 import type { Request, Response, NextFunction } from 'express';
 
 export type TelegramUser = { id: number; first_name: string; username?: string; photo_url?: string };
@@ -35,6 +36,9 @@ export function telegramAuth(req: Request, res: Response, next: NextFunction) {
 export function getTelegramUser(req: Request): TelegramUser { return (req as Request & { tgUser?: TelegramUser }).tgUser!; }
 
 export function adminAuth(req: Request, res: Response, next: NextFunction) {
+  const browserToken = req.header('x-admin-session') || '';
+  const browserAdmin = browserToken ? verifyAdminSession(browserToken) : null;
+  if (browserAdmin) { (req as Request & { tgUser?: TelegramUser }).tgUser = browserAdmin; return next(); }
   const enabled = process.env.NODE_ENV === 'development' && process.env.ALLOW_LOCAL_ADMIN === 'true';
   if (!enabled) return telegramAuth(req, res, next);
   const id = Number(process.env.LOCAL_ADMIN_TELEGRAM_ID || '1');
