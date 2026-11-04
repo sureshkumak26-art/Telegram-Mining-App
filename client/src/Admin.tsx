@@ -30,8 +30,11 @@ async function api(path: string, method = 'GET', body?: unknown) {
   const browserSession = sessionStorage.getItem('admin-session') || '';
   if (!initData && !browserSession) throw new Error('Please sign in to the admin dashboard.');
   const headers: Record<string, string> = { 'content-type': 'application/json' };
-  if (initData) headers['x-telegram-init-data'] = initData;
+  // Browser login and Telegram WebApp auth are separate credentials. Never send
+  // stale Telegram initData alongside a valid browser session: the backend
+  // should authenticate the browser session without falling back to Telegram.
   if (browserSession) headers['x-admin-session'] = browserSession;
+  else if (initData) headers['x-telegram-init-data'] = initData;
   const response = await fetch(`${API}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Request failed');
