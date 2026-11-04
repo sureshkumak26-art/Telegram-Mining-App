@@ -37,7 +37,13 @@ async function api(path: string, method = 'GET', body?: unknown) {
   else if (initData) headers['x-telegram-init-data'] = initData;
   const response = await fetch(`${API}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Request failed');
+  if (!response.ok) {
+    if (response.status === 401 && browserSession) {
+      sessionStorage.removeItem('admin-session');
+      throw new Error('BROWSER_SESSION_EXPIRED: Sign in again to continue.');
+    }
+    throw new Error(data.error || 'Request failed');
+  }
   return data;
 }
 function AdminBrowserLogin() {
@@ -77,6 +83,7 @@ export default function Admin() {
   const [tab, setTab] = useState<Tab>('overview');
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<number | null>(null);
   const [adminQr, setAdminQr] = useQrState('');
@@ -92,7 +99,13 @@ export default function Admin() {
   async function refresh() {
     setLoading(true); setError('');
     try { setDashboard(await api('/api/admin/dashboard')); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Unable to load admin dashboard'); }
+    catch (e) {
+      const message = e instanceof Error ? e.message : 'Unable to load admin dashboard';
+      if (message.startsWith('BROWSER_SESSION_EXPIRED:')) {
+        setSessionExpired(true);
+        setError('');
+      } else setError(message);
+    }
     finally { setLoading(false); }
   }
   useEffect(() => { if (!telegramAdmin && !browserAdmin) { setLoading(false); return; } void refresh(); void api('/api/admin/tasks').then(d => setTaskConfigs(d.tasks || [])).catch(() => undefined); void api('/api/admin/referral-settings').then(setReferralSettings).catch(() => undefined); }, []);
@@ -168,7 +181,7 @@ export default function Admin() {
     { id: 'withdrawals', label: 'Withdrawals', icon: '↗' },
     { id: 'ledger', label: 'Ledger', icon: '≋' }
   ];
-  if (!telegramAdmin && !browserAdmin) return <AdminBrowserLogin />;
+  if (sessionExpired || (!telegramAdmin && !browserAdmin)) return <AdminBrowserLogin />;
   return <main className="admin-dashboard">
     <header className="admin-header">
       <div className="admin-brand-icon">✦</div>
