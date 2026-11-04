@@ -27,13 +27,45 @@ type TaskConfig = { id: string; title: string; description: string; url: string;
 type Dashboard = { settings: { ethereumTreasuryAddress: string | null; ethereumDepositQr: string | null; network: string };  cryptoWithdrawals: CryptoWithdrawal[]; stats: { totalUsers: number; totalPoints: number; totalTaps: number; active24h: number; pendingWithdrawals: number; totalDeposits: string; totalWithdrawals: string }; users: User[]; ledger: Ledger[]; withdrawals: Withdrawal[] };
 async function api(path: string, method = 'GET', body?: unknown) {
   const initData = getTelegramInitData();
-  if (!initData) {
-    throw new Error('Telegram authentication is unavailable. Open the Admin page from your Telegram bot menu button, not in a normal browser tab.');
-  }
-  const response = await fetch(`${API}${path}`, { method, headers: { 'content-type': 'application/json', 'x-telegram-init-data': initData }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const browserSession = sessionStorage.getItem('admin-session') || '';
+  if (!initData && !browserSession) throw new Error('Please sign in to the admin dashboard.');
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (initData) headers['x-telegram-init-data'] = initData;
+  if (browserSession) headers['x-admin-session'] = browserSession;
+  const response = await fetch(`${API}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Request failed');
   return data;
+}
+function AdminBrowserLogin() {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError('');
+    try {
+      const response = await fetch(`${API}/api/admin/browser/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || typeof data.token !== 'string') throw new Error(data.error || 'Sign-in failed.');
+      sessionStorage.setItem('admin-session', data.token);
+      window.location.reload();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not sign in.'); }
+    finally { setBusy(false); }
+  }
+  return <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20, background: '#05090d', color: '#edf7f7', fontFamily: 'Inter,system-ui,sans-serif' }}>
+    <form onSubmit={submit} style={{ width: 'min(100%, 390px)', padding: 28, border: '1px solid #1c3935', borderRadius: 18, background: '#091316', boxSizing: 'border-box' }}>
+      <div style={{ color: '#4FD2C0', fontSize: 11, letterSpacing: 2, fontWeight: 800 }}>HYPERLIQUID · CONTROL CENTER</div>
+      <h1 style={{ margin: '10px 0 6px', fontSize: 27 }}>MINER ADMIN</h1>
+      <p style={{ color: '#829b95', fontSize: 12, lineHeight: 1.6, marginBottom: 24 }}>Sign in securely to manage your Telegram Mining App.</p>
+      <label style={{ display: 'block', fontSize: 11, color: '#a9c1bb', marginBottom: 7 }}>ADMIN USERNAME</label>
+      <input autoComplete="username" required value={username} onChange={e => setUsername(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: 13, marginBottom: 16, borderRadius: 9, border: '1px solid #21423c', background: '#050b0e', color: 'white' }} />
+      <label style={{ display: 'block', fontSize: 11, color: '#a9c1bb', marginBottom: 7 }}>PASSWORD</label>
+      <input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: 13, marginBottom: 18, borderRadius: 9, border: '1px solid #21423c', background: '#050b0e', color: 'white' }} />
+      {error && <p role="alert" style={{ color: '#ffabb1', fontSize: 12 }}>{error}</p>}
+      <button disabled={busy} type="submit" style={{ width: '100%', padding: 14, border: 0, borderRadius: 10, background: '#4FD2C0', color: '#041017', fontWeight: 800 }}>{busy ? 'Signing in…' : 'Sign in securely'}</button>
+    </form>
+  </main>;
 }
 const number = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 const date = (value: string) => new Date(value).toLocaleString();
@@ -52,13 +84,15 @@ export default function Admin() {
   const [savingTask, setSavingTask] = useState('');
   const [referralSettings, setReferralSettings] = useState({ enabled: true, reward: 10 });
   const [savingReferral, setSavingReferral] = useState(false);
+  const telegramAdmin = Boolean(getTelegramInitData());
+  const browserAdmin = Boolean(sessionStorage.getItem('admin-session'));
   async function refresh() {
     setLoading(true); setError('');
     try { setDashboard(await api('/api/admin/dashboard')); }
     catch (e) { setError(e instanceof Error ? e.message : 'Unable to load admin dashboard'); }
     finally { setLoading(false); }
   }
-  useEffect(() => { void refresh(); void api('/api/admin/tasks').then(d => setTaskConfigs(d.tasks || [])).catch(() => undefined); void api('/api/admin/referral-settings').then(setReferralSettings).catch(() => undefined); }, []);
+  useEffect(() => { if (!telegramAdmin && !browserAdmin) { setLoading(false); return; } void refresh(); void api('/api/admin/tasks').then(d => setTaskConfigs(d.tasks || [])).catch(() => undefined); void api('/api/admin/referral-settings').then(setReferralSettings).catch(() => undefined); }, []);
   useEffect(() => { if (dashboard?.settings?.ethereumTreasuryAddress) setDepositAddress(dashboard.settings.ethereumTreasuryAddress);
     if (dashboard?.settings?.ethereumDepositQr !== undefined) setManualQr(dashboard.settings.ethereumDepositQr || ''); }, [dashboard?.settings?.ethereumTreasuryAddress]);
   useQrEffect(() => {
@@ -131,11 +165,12 @@ export default function Admin() {
     { id: 'withdrawals', label: 'Withdrawals', icon: '↗' },
     { id: 'ledger', label: 'Ledger', icon: '≋' }
   ];
+  if (!telegramAdmin && !browserAdmin) return <AdminBrowserLogin />;
   return <main className="admin-dashboard">
     <header className="admin-header">
       <div className="admin-brand-icon">✦</div>
       <div className="admin-brand"><span>HYPERLIQUID · CONTROL CENTER</span><h1>MINER <b>ADMIN</b></h1></div>
-      <div className="admin-secure"><i/> SECURE</div>
+      <div className="admin-secure"><i/> SECURE</div>{browserAdmin && <button className="admin-refresh" onClick={() => { sessionStorage.removeItem('admin-session'); window.location.reload(); }}>Sign out</button>}
     </header>
     <div className="admin-layout">
       <aside className="admin-sidebar">
