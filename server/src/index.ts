@@ -24,7 +24,20 @@ const app = express();
 const port = Number(process.env.PORT || 3001);
 app.disable('x-powered-by');
 app.use(helmet());
-app.use(cors({ origin: (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',').map(s => s.trim()), methods: ['GET','POST','PATCH','PUT','DELETE','OPTIONS'], allowedHeaders: ['content-type','x-telegram-init-data'] }));
+const configuredOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    let isProjectVercelPreview = false;
+    try {
+      const hostname = new URL(origin).hostname;
+      isProjectVercelPreview = /^telegram-mining-app(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(hostname);
+    } catch { /* Invalid origins are rejected below. */ }
+    callback(null, configuredOrigins.includes(origin) || isProjectVercelPreview);
+  },
+  methods: ['GET','POST','PATCH','PUT','DELETE','OPTIONS'],
+  allowedHeaders: ['content-type','x-telegram-init-data']
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-7', legacyHeaders: false }));
 app.use('/api', gameRouter);
