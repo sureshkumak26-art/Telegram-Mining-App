@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import { createHmac, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 const scrypt = promisify(scryptCallback);
 
@@ -34,10 +34,4 @@ export function verifyAdminSession(token: string): AdminSession | null {
     if (!Number.isSafeInteger(data.sub) || !admins.has(String(data.sub)) || !Number.isSafeInteger(data.exp) || (data.exp || 0) <= Math.floor(Date.now() / 1000)) return null;
     return { id: data.sub as number, first_name: 'Web Admin', username: 'browser_admin' };
   } catch { return null; }
-}
-
-export function makePasswordHash(password: string): string {
-  const salt = randomBytes(16);
-  // Used only by the local helper script; keep this function out of request handling.
-  throw new Error('Generate password hashes with the documented Node.js command.');
 }
