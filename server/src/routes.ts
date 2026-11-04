@@ -2,9 +2,38 @@ import { Router, type Request, type Response } from 'express';
 import { getSetting, pool, setSetting } from './db.js';
 import { adminAuth, telegramAuth, getTelegramUser } from './telegram.js';
 import { getAddress, isAddress } from 'ethers';
+import rateLimit from 'express-rate-limit';
+import { timingSafeEqual } from 'node:crypto';
+import { createAdminSession, verifyAdminPassword } from './adminSession.js';
 
 export const gameRouter = Router();
 const MIN_WITHDRAWAL = 100;
+const browserLoginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts. Try again in 15 minutes.' } });
+function safeTextEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a); const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+gameRouter.post('/admin/browser/login', browserLoginLimiter, async (req, res) => {
+  const username = typeof req.body?.username === 'string' ? req.body.username : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const configuredUsername = process.env.ADMIN_WEB_USERNAME || '';
+  const passwordHash = process.env.ADMIN_WEB_PASSWORD_HASH || '';
+  const admins = (process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(value => value.trim()).filter(value => /^\\d+$/.test(value));
+  if (!configuredUsername || !passwordHash || (process.env.ADMIN_SESSION_SECRET || '').length < 32 || !admins.length) {
+    return res.status(503).json({ error: 'Browser admin login is not configured on the server.' });
+  }
+  if (!username || username.length > 100 || !password || password.length > 256 ||
+      !safeTextEqual(username, configuredUsername) || !(await verifyAdminPassword(password, passwordHash))) {
+    return res.status(401).json({ error: 'Invalid username or password.' });
+  }
+  try {
+    const session = createAdminSession(Number(admins[0]));
+    res.json({ token: session, expiresIn: 8 * 60 * 60 });
+  } catch {
+    res.status(503).json({ error: 'Browser admin login is not configured correctly.' });
+  }
+});
+
 function admins(): Set<string> {
   return new Set((process.env.ADMIN_TELEGRAM_IDS || '').split(',').map(s => s.trim()).filter(Boolean));
 }
