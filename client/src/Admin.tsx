@@ -31,13 +31,7 @@ async function api(path: string, method = 'GET', body?: unknown) {
   const headers: Record<string, string> = { 'content-type': 'application/json', 'x-telegram-init-data': initData };
   const response = await fetch(`${API}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    if (response.status === 401 && browserSession) {
-      sessionStorage.removeItem('admin-session');
-      throw new Error('BROWSER_SESSION_EXPIRED: Sign in again to continue.');
-    }
-    throw new Error(data.error || 'Request failed');
-  }
+  if (!response.ok) throw new Error(data.error || 'Request failed');
   return data;
 }
 const number = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
