@@ -61,3 +61,36 @@ button,a,[role="button"]{touch-action:manipulation}button:focus-visible,a:focus-
 .wallet-page-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 18px}.wallet-page-actions button{min-height:50px;cursor:pointer}@media(max-width:380px){.wallet-page-actions{grid-template-columns:1fr}}
 
 .admin-referral-settings{display:grid;grid-template-columns:minmax(0,1fr) 90px 58px 70px;align-items:center;gap:12px;margin-bottom:18px;padding:18px;border:1px solid #1e4b5c;border-radius:16px;background:linear-gradient(135deg,#081820,#091015)}.admin-referral-settings h3{margin:6px 0}.admin-referral-settings p{color:#78908c;font-size:11px;margin:0}.admin-referral-settings button{padding:10px 8px;border-radius:9px;font:700 10px Inter,sans-serif;cursor:pointer}@media(max-width:600px){.admin-referral-settings{grid-template-columns:1fr 75px 45px 62px;gap:7px}}
+
+/* Telegram Mini App viewport and safe-area layout */
+html,
+body,
+#root {
+  min-height: 100dvh;
+}
+
+body {
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+.app-shell {
+  min-height: var(--tg-viewport-height, 100dvh);
+  padding-bottom: calc(105px + env(safe-area-inset-bottom, 0px));
+}
+
+.app-content {
+  min-height: calc(var(--tg-viewport-height, 100dvh) - 76px);
+  padding-top: 0;
+  padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+}
+
+.page-heading {
+  margin-top: 0;
+}
+
+@media (min-width: 600px) {
+  .app-content {
+    padding-top: 0;
+  }
+}
