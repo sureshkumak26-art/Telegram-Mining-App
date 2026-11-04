@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
+import EthereumProvider from '@walletconnect/ethereum-provider';
 
 const API = import.meta.env.VITE_API_URL || '';
 type Summary = {
@@ -18,6 +19,7 @@ async function api(path: string, initData: string, method = 'GET', body?: unknow
 }
 export default function CryptoWallet({ initData, isTelegram, onBalanceChange, action = null, onActionChange }: Props) {
   const [data, setData] = useState<Summary | null>(null);
+  const walletProviderRef = useRef<any>(null);
   const [txHash, setTxHash] = useState('');
   const [amount, setAmount] = useState('');
   const [destination, setDestination] = useState('');
@@ -50,10 +52,33 @@ export default function CryptoWallet({ initData, isTelegram, onBalanceChange, ac
   }, [data?.treasuryAddress, data?.qrDataUrl]);
   async function connect() {
     if (!isTelegram) { setError('Open the Mini App inside Telegram to link a wallet.'); return; }
-    const eth = (window as any).ethereum;
-    if (!eth?.request) { setError('No injected Ethereum wallet found. Open this page in MetaMask or another browser with an Ethereum wallet provider.'); return; }
     setBusy(true); setError(''); setMessage('');
     try {
+      // Prefer an injected provider (MetaMask browser, etc.). In Telegram's
+      // in-app browser, fall back to WalletConnect's wallet picker/deep links.
+      let eth = (window as any).ethereum;
+      if (!eth?.request) {
+        const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+        if (!projectId) throw new Error('WalletConnect is not configured yet. Add VITE_WALLETCONNECT_PROJECT_ID to the Vercel frontend environment.');
+        const provider = await EthereumProvider.init({
+          projectId,
+          chains: [1],
+          showQrModal: true,
+          methods: ['eth_sendTransaction', 'personal_sign', 'eth_signTypedData', 'eth_signTypedData_v4'],
+          events: ['chainChanged', 'accountsChanged'],
+          metadata: {
+            name: 'Telegram Miner',
+            description: 'Connect an Ethereum wallet to Telegram Miner',
+            url: window.location.origin,
+            icons: []
+          },
+          rpcMap: { 1: 'https://cloudflare-eth.com' }
+        });
+        await provider.connect();
+        walletProviderRef.current = provider;
+        eth = provider;
+      }
+      if (!eth?.request) throw new Error('Wallet connection did not provide an Ethereum account.');
       const accounts = await eth.request({ method: 'eth_requestAccounts' }) as string[];
       const address = accounts?.[0];
       if (!address) throw new Error('No wallet account selected.');
@@ -89,7 +114,7 @@ export default function CryptoWallet({ initData, isTelegram, onBalanceChange, ac
   }
   async function disconnect() {
     setBusy(true);
-    try { await api('/api/crypto/disconnect', initData, 'POST'); await refresh(); setMessage('Wallet disconnected. Internal balances remain in your account.'); }
+    try { await api('/api/crypto/disconnect', initData, 'POST'); await walletProviderRef.current?.disconnect?.(); walletProviderRef.current = null; await refresh(); setMessage('Wallet disconnected. Internal balances remain in your account.'); }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not disconnect wallet'); }
     finally { setBusy(false); }
   }
@@ -107,7 +132,7 @@ export default function CryptoWallet({ initData, isTelegram, onBalanceChange, ac
     <section className="wallet-balance glass-card crypto-network-card"><label>NETWORK</label><strong>Ethereum <span>MAINNET</span></strong><small>ETH deposits · Hyperliquid-only ETH withdrawals · 12 confirmations</small><button className="crypto-refresh" onClick={() => void refresh()}>↻ Refresh wallet</button></section>
     <section className="glass-card crypto-connect-card">
       <div className="crypto-card-heading"><div><label>EXTERNAL WALLET</label><h3>{data?.wallet ? 'Wallet connected' : 'Connect your wallet'}</h3></div><div className="crypto-coin-icon">Ξ</div></div>
-      {data?.wallet ? <><div className="crypto-address">{data.wallet.address}</div><p className="crypto-hint">Verified by signature. Private keys stay in your wallet and are never sent to this app.</p><button className="secondary-btn full-btn" disabled={busy} onClick={disconnect}>Disconnect wallet</button></> : <><p className="crypto-hint">Connect MetaMask or another injected Ethereum wallet. Sign a one-time message; it does not send a transaction or spend gas.</p><button className="blue-btn full-btn" disabled={busy} onClick={connect}>{busy ? 'Connecting…' : 'Connect Ethereum wallet'}</button></>}
+      {data?.wallet ? <><div className="crypto-address">{data.wallet.address}</div><p className="crypto-hint">Verified by signature. Private keys stay in your wallet and are never sent to this app.</p><button className="secondary-btn full-btn" disabled={busy} onClick={disconnect}>Disconnect wallet</button></> : <><p className="crypto-hint">Connect MetaMask or another Ethereum wallet using WalletConnect. Sign a one-time message; it does not send a transaction or spend gas.</p><button className="blue-btn full-btn" disabled={busy} onClick={connect}>{busy ? 'Connecting…' : 'Connect Ethereum wallet'}</button></>}
     </section>
     <section className="crypto-balances crypto-balances-single">
       <div className="crypto-balance-card glass-card"><span className="crypto-asset-icon">Ξ</span><small>ETH BALANCE</small><strong>{balance('ETH')}</strong><span>Ethereum Mainnet</span></div>
