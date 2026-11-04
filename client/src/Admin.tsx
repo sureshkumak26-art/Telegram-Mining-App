@@ -3,7 +3,21 @@ import { useEffect as useQrEffect, useState as useQrState } from 'react';
 import QRCode from 'qrcode';
 
 const API = import.meta.env.VITE_API_URL || '';
-const tg = (window as any).Telegram?.WebApp;
+
+type TelegramWebAppAuth = {
+  initData?: string;
+  ready?: () => void;
+  expand?: () => void;
+};
+
+function getTelegramInitData(): string {
+  // Read WebApp at request time rather than capturing it during module evaluation.
+  // This also handles Telegram's script becoming available after the app bundle.
+  const webApp = (window as any).Telegram?.WebApp as TelegramWebAppAuth | undefined;
+  webApp?.ready?.();
+  webApp?.expand?.();
+  return typeof webApp?.initData === 'string' ? webApp.initData : '';
+}
 type Tab = 'overview' | 'users' | 'withdrawals' | 'ledger';
 type Withdrawal = { id: number; telegram_id: string; points: number; payout_method: string; payout_details: string; status: string; created_at: string };
 type User = { telegram_id: string; first_name: string; username?: string; points: number; energy: number; taps: number; created_at: string; updated_at: string };
@@ -12,7 +26,11 @@ type CryptoWithdrawal = { id: number; telegram_id: string; asset: string; amount
 type TaskConfig = { id: string; title: string; description: string; url: string; icon: string; reward: number; enabled: boolean };
 type Dashboard = { settings: { ethereumTreasuryAddress: string | null; ethereumDepositQr: string | null; network: string };  cryptoWithdrawals: CryptoWithdrawal[]; stats: { totalUsers: number; totalPoints: number; totalTaps: number; active24h: number; pendingWithdrawals: number; totalDeposits: string; totalWithdrawals: string }; users: User[]; ledger: Ledger[]; withdrawals: Withdrawal[] };
 async function api(path: string, method = 'GET', body?: unknown) {
-  const response = await fetch(`${API}${path}`, { method, headers: { 'content-type': 'application/json', 'x-telegram-init-data': tg?.initData || '' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const initData = getTelegramInitData();
+  if (!initData) {
+    throw new Error('Telegram authentication is unavailable. Open the Admin page from your Telegram bot menu button, not in a normal browser tab.');
+  }
+  const response = await fetch(`${API}${path}`, { method, headers: { 'content-type': 'application/json', 'x-telegram-init-data': initData }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Request failed');
   return data;
