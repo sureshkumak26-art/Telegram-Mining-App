@@ -36,7 +36,7 @@ app.use(cors({
     callback(null, configuredOrigins.includes(origin) || isProjectVercelPreview);
   },
   methods: ['GET','POST','PATCH','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['content-type','x-telegram-init-data']
+  allowedHeaders: ['content-type','x-telegram-init-data','x-admin-session']
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-7', legacyHeaders: false }));
