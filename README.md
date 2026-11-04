@@ -78,7 +78,9 @@ The admin dashboard does not collect or store a treasury private key and does no
 
 ## Ethereum wallet setup
 
-The crypto wallet supports **Ethereum Mainnet ETH deposits**. USDC deposit verification remains backend-optional and is only enabled when its contract is configured. Withdrawals are Hyperliquid-only ETH requests sent manually to the user's Hyperliquid ETH deposit address. It provides an external wallet link using a one-time signed message, an internal app balance, on-chain deposit verification, and admin-reviewed withdrawals. It does **not** generate or hold a user's private key. The treasury address is a shared deposit address; only ETH and the exact configured USDC contract are accepted, and deposits must originate from the linked wallet address.
+The crypto wallet supports **Ethereum Mainnet ETH deposits**. USDC deposit verification remains backend-optional and is only enabled when its contract is configured. Withdrawals are Hyperliquid-only ETH requests sent manually to the user's Hyperliquid ETH deposit address. It connects external Ethereum wallets through WalletConnect (with injected-wallet fallback) using a one-time signed message, an internal app balance, on-chain deposit verification, and admin-reviewed withdrawals. It does **not** generate or hold a user's private key. The treasury address is a shared deposit address; only ETH and the exact configured USDC contract are accepted, and deposits must originate from the linked wallet address.
+
+Create a free Reown project at https://cloud.reown.com and copy its Project ID. Add `VITE_WALLETCONNECT_PROJECT_ID` to the **Vercel frontend environment** (Production and Preview), then redeploy the frontend. This is a public application identifier, not a private key. WalletConnect opens its wallet picker/deep links inside supported mobile webviews; users must approve the connection and sign the one-time challenge in their wallet. Injected wallets such as MetaMask remain supported as a fallback.
 
 Set these variables on the **backend only** before enabling crypto deposits:
 
