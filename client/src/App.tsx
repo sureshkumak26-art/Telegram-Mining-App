@@ -220,7 +220,6 @@ export default function App() {
   }
 
   return <main className="app-shell">
-    <header className="telegram-bar"><div className="tg-close" aria-hidden="true">×</div><div className="tg-title">Telegram Miner</div><div className="tg-chevron">⌄</div><div className="tg-menu">⋮</div></header>
     <div className="app-content">
       {tab === 'tap' && <>
         <section className="user-strip"><div className="user-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : (profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><button className="wallet-chip points-chip" aria-label="Open ETH wallet" aria-haspopup="dialog" onClick={() => setWalletOpen(true)}>Ξ <span>ETH WALLET<br/><b>{ethBalance} ETH</b></span> ›</button></section>
