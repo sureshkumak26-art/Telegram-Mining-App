@@ -28,9 +28,9 @@ gameRouter.get('/admin/referral-settings', adminAuth, async (req,res,next)=>{ tr
 gameRouter.patch('/admin/referral-settings', adminAuth, async (req,res,next)=>{ try { if(!requireAdmin(req,res))return; const enabled=req.body?.enabled; const reward=Number(req.body?.reward); if(typeof enabled!=='boolean'||!Number.isFinite(reward)||reward<0||reward>100000) return res.status(400).json({error:'Enter a valid referral reward and status.'}); await setSetting('referral_enabled',String(enabled)); await setSetting('referral_reward_points',reward.toFixed(2)); res.json({enabled,reward}); } catch(e){next(e);} });
 
 function taskRow(row: any) { return { id: row.id, title: row.title, description: row.description, url: row.url, icon: row.icon, reward: Number(row.reward), enabled: Boolean(row.enabled), claimed: Boolean(row.claimed) }; }
-gameRouter.get('/tasks', async (req, res, next) => {
+gameRouter.get('/tasks', (req, res, next) => req.header('x-telegram-init-data') ? telegramAuth(req, res, next) : next(), async (req, res, next) => {
   try {
-    const tg = req.headers['x-telegram-init-data'] ? getTelegramUser(req) : null;
+    const tg = req.header('x-telegram-init-data') ? getTelegramUser(req) : null;
     const result = await pool.query('SELECT t.*, c.telegram_id IS NOT NULL AS claimed FROM task_configs t LEFT JOIN task_claims c ON c.task_id=t.id AND c.telegram_id=$1 ORDER BY t.id', [tg?.id || 0]);
     res.json({ tasks: result.rows.map(taskRow) });
   } catch (e) { next(e); }
