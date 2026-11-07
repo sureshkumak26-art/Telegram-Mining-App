@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Admin from './Admin';
+import CryptoWallet from './CryptoWallet';
 
-type Profile = { id: string; firstName: string; username?: string; points: number; energy: number; maxEnergy: number; taps: number; resetAt?: string | null };
+type Profile = { id: string; firstName: string; username?: string; avatarUrl?: string; points: number; energy: number; maxEnergy: number; taps: number; resetAt?: string | null };
 type Tab = 'refer' | 'tasks' | 'tap' | 'wallet';
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+type Task = { id: string; title: string; description: string; url: string; icon: string; reward: number; enabled: boolean; claimed: boolean };
+type Referral = { enabled: boolean; reward: number; totalReferrals: number; activeReferrals: number; pointsEarned: number };
+const API = import.meta.env.VITE_API_URL || '';
 const telegram = (window as any).Telegram?.WebApp;
 
 async function request(path: string, initData: string, options: RequestInit = {}) {
@@ -19,6 +22,7 @@ function Icon({ name }: { name: string }) {
 export default function App() {
   if (window.location.pathname === '/admin') return <Admin />;
   const initData = telegram?.initData || '';
+  const [profileReady, setProfileReady] = useState(!initData);
   const [profile, setProfile] = useState<Profile>(() => {
     if (!initData) {
       try {
@@ -59,31 +63,129 @@ export default function App() {
       }
     }
 
-    return { id: 'demo', firstName: 'Miner', points: 0, energy: 1000, maxEnergy: 1000, taps: 0, resetAt: null };
+    const telegramUser = telegram?.initDataUnsafe?.user;
+    return {
+      id: telegramUser?.id ? String(telegramUser.id) : 'demo',
+      firstName: typeof telegramUser?.first_name === 'string' && telegramUser.first_name.trim() ? telegramUser.first_name : 'Miner',
+      username: typeof telegramUser?.username === 'string' ? telegramUser.username : undefined,
+      avatarUrl: typeof telegramUser?.photo_url === 'string' ? telegramUser.photo_url : undefined,
+      points: 0, energy: 1000, maxEnergy: 1000, taps: 0, resetAt: null
+    };
   });
   const [tab, setTab] = useState<Tab>('tap');
+  const [ethBalance, setEthBalance] = useState('0');
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [taskBusy, setTaskBusy] = useState('');
+  const [referral, setReferral] = useState<Referral>({ enabled: true, reward: 10, totalReferrals: 0, activeReferrals: 0, pointsEarned: 0 });
+  const [walletOpen, setWalletOpen] = useState(false);
+  const [walletAction, setWalletAction] = useState<'deposit' | 'withdraw' | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const pendingTaps = useRef(0);
+  const tapTimer = useRef<number | null>(null);
+  const tapInFlight = useRef(false);
+  const visibleEnergy = useRef(profile.energy);
   const [tapAnimation, setTapAnimation] = useState(0);
   const [now, setNow] = useState(Date.now());
-  const [withdrawPoints, setWithdrawPoints] = useState('100');
-  const [upi, setUpi] = useState('');
+  const [hypePrice, setHypePrice] = useState<number | null>(null);
   const [refCopied, setRefCopied] = useState(false);
   const isTelegram = Boolean(initData);
-  const botUsername = import.meta.env.VITE_TELEGRAM_BOT_USERNAME || '';
+  const [botUsername, setBotUsername] = useState(import.meta.env.VITE_TELEGRAM_BOT_USERNAME || '');
   const referralLink = botUsername ? `https://t.me/${botUsername}?start=ref_${profile.id}` : '';
 
   useEffect(() => {
+    let active = true;
     if (!initData) {
+      setProfileReady(true);
       setNotice('Preview mode · progress is saved in this browser only. Open inside Telegram to use your server balance.');
-      return;
+      return () => { active = false; };
     }
-    request('/api/me', initData).then((d) => setProfile(d.profile)).catch((e) => setNotice(e.message));
+    setProfileReady(false);
+    request('/api/me', initData)
+      .then((d) => { if (active) { setProfile(d.profile); setProfileReady(true); } })
+      .catch((e) => { if (active) setNotice(e.message); });
+    return () => { active = false; };
   }, [initData]);
+
+  // Reconcile the visible balance with the database whenever the Mini App resumes.
+  // Do not refresh during an in-flight or queued tap batch, which could overwrite optimistic taps.
+  useEffect(() => {
+    if (!initData) return;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible' || tapInFlight.current || pendingTaps.current > 0) return;
+      request('/api/me', initData).then((d) => {
+        if (!tapInFlight.current && pendingTaps.current === 0) setProfile(d.profile);
+      }).catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [initData]);
+
+  useEffect(() => {
+    request('/api/referral/public-config', initData).then(d => { if (typeof d.botUsername === 'string' && d.botUsername) setBotUsername(d.botUsername); }).catch(() => undefined);
+  }, [initData]);
+
+  useEffect(() => {
+    if (!initData) return;
+    request('/api/referral/summary', initData).then(setReferral).catch(() => undefined);
+  }, [initData]);
+
+  useEffect(() => {
+    const storageKey = initData
+      ? 'hyperliquid-task-claims-' + String(telegram?.initDataUnsafe?.user?.id || 'telegram')
+      : 'hyperliquid-preview-task-claims';
+    let locallyConfirmed: string[] = [];
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      if (Array.isArray(saved)) locallyConfirmed = saved.map(String);
+    } catch {}
+    request('/api/tasks', initData).then(d => {
+      setTasks((Array.isArray(d.tasks) ? d.tasks : []).map((task: Task) => ({
+        ...task,
+        claimed: Boolean(task.claimed) || locallyConfirmed.includes(String(task.id))
+      })));
+    }).catch(() => setTasks(current => current.map(task => ({
+      ...task,
+      claimed: task.claimed || locallyConfirmed.includes(String(task.id))
+    }))));
+  }, [initData]);
+
+  useEffect(() => {
+    if (!initData) return;
+    request('/api/crypto/summary', initData)
+      .then((d) => setEthBalance(d.balances?.find((b: { asset: string }) => b.asset === 'ETH')?.balance || '0'))
+      .catch(() => undefined);
+  }, [initData]);
+
+  useEffect(() => {
+    if (pendingTaps.current === 0 && !tapInFlight.current) visibleEnergy.current = profile.energy;
+  }, [profile.energy]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadHypePrice = async () => {
+      try {
+        const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=hyperliquid&vs_currencies=usd', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Live price unavailable');
+        const data = await response.json();
+        const price = Number(data?.hyperliquid?.usd);
+        if (active && Number.isFinite(price) && price > 0) setHypePrice(price);
+      } catch {
+        // Keep the last successful quote; the next refresh will retry.
+      }
+    };
+    void loadHypePrice();
+    const timer = window.setInterval(() => { void loadHypePrice(); }, 60_000);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
 
   useEffect(() => {
@@ -117,45 +219,76 @@ export default function App() {
   const resetRemaining = profile.resetAt ? Math.max(0, new Date(profile.resetAt).getTime() - now) : 0;
   const resetCountdown = `${String(Math.floor(resetRemaining / 3600000)).padStart(2, '0')}:${String(Math.floor((resetRemaining % 3600000) / 60000)).padStart(2, '0')}:${String(Math.floor((resetRemaining % 60000) / 1000)).padStart(2, '0')}`;
 
-  async function tap() {
-    if (busy || profile.energy < 1) return;
-    setTapAnimation(n => n + 1);
-    if (!isTelegram) {
+  async function flushTapQueue() {
+    if (!isTelegram || tapInFlight.current || pendingTaps.current < 1) return;
+    if (tapTimer.current !== null) { window.clearTimeout(tapTimer.current); tapTimer.current = null; }
+    tapInFlight.current = true;
+    setBusy(true);
+    const count = Math.min(50, pendingTaps.current);
+    pendingTaps.current -= count;
+    try {
+      const d = await request('/api/tap', initData, { method: 'POST', body: JSON.stringify({ count }) });
+      const accepted = Number(d.acceptedCount ?? count);
+      const rejected = count - accepted;
+      if (rejected > 0) {
+        pendingTaps.current = Math.max(0, pendingTaps.current - rejected);
+        visibleEnergy.current = Math.min(1000, visibleEnergy.current + rejected);
+      }
+      const stillQueued = pendingTaps.current;
+      const energy = Math.max(0, Number(d.profile.energy) - stillQueued);
+      const resetAt = energy === 0 ? (d.profile.resetAt || new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : d.profile.resetAt;
+      const nextProfile = { ...d.profile, points: Math.round((Number(d.profile.points) + stillQueued * 0.02) * 100) / 100, energy, taps: Number(d.profile.taps) + stillQueued, resetAt };
+      visibleEnergy.current = energy;
+      setProfile(nextProfile);
+    } catch (e) {
+      // Roll back only the batch that failed; taps queued while it was in flight remain visible.
       setProfile(p => {
-        const energy = Math.max(0, p.energy - 1);
-        return { ...p, points: Math.round((p.points + 0.02) * 100) / 100, energy, taps: p.taps + 1, resetAt: energy === 0 ? new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString() : p.resetAt };
+        const energy = Math.min(p.maxEnergy, p.energy + count);
+        visibleEnergy.current = Math.min(p.maxEnergy, visibleEnergy.current + count);
+        return { ...p, points: Math.max(0, Math.round((p.points - count * 0.02) * 100) / 100), energy, taps: Math.max(0, p.taps - count), resetAt: energy > 0 ? null : p.resetAt };
       });
-      return;
+      setNotice(e instanceof Error ? e.message : 'Tap failed. Please try again.');
+    } finally {
+      tapInFlight.current = false;
+      setBusy(false);
+      if (pendingTaps.current > 0) void flushTapQueue();
     }
-    setBusy(true); setNotice('');
-    try { const d = await request('/api/tap', initData, { method: 'POST', body: JSON.stringify({ count: 1 }) }); setProfile(d.profile); }
-    catch (e) { setNotice(e instanceof Error ? e.message : 'Tap failed'); }
-    finally { setBusy(false); }
+  }
+
+  function tap() {
+    // Wait for the authenticated database balance before accepting taps; otherwise
+    // the initial /api/me response could overwrite points earned during app startup.
+    if (isTelegram && !profileReady) return;
+    // Keep the fast-tap ref aligned with the rendered profile after refreshes or failed syncs.
+    visibleEnergy.current = Math.max(0, Math.min(profile.maxEnergy, Math.max(visibleEnergy.current, profile.energy)));
+    if (visibleEnergy.current < 1) return;
+    visibleEnergy.current -= 1;
+    pendingTaps.current += 1;
+    setTapAnimation(n => n + 1);
+    setProfile(p => {
+      if (p.energy < 1) return p;
+      const energy = Math.max(0, p.energy - 1);
+      return { ...p, points: Math.round((p.points + 0.02) * 100) / 100, energy, taps: p.taps + 1, resetAt: energy === 0 ? (p.resetAt && new Date(p.resetAt).getTime() > Date.now() ? p.resetAt : new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : p.resetAt };
+    });
+    if (!isTelegram) return;
+    setNotice('');
+    if (tapTimer.current === null && !tapInFlight.current) {
+      tapTimer.current = window.setTimeout(() => { tapTimer.current = null; void flushTapQueue(); }, 80);
+    }
   }
   async function copyReferral() {
     if (!referralLink) { setNotice('Set VITE_TELEGRAM_BOT_USERNAME in the frontend environment to enable your referral link.'); return; }
     try { await navigator.clipboard.writeText(referralLink); setRefCopied(true); setTimeout(() => setRefCopied(false), 1800); }
     catch { setNotice('Copy is unavailable in this browser.'); }
   }
-  async function withdraw() {
-    const points = Number(withdrawPoints);
-    if (!isTelegram) { setNotice('Open this app inside Telegram to submit a real withdrawal request.'); return; }
-    setBusy(true); setNotice('');
-    try {
-      await request('/api/withdrawals', initData, { method:'POST', body:JSON.stringify({ points, payoutMethod:'UPI', payoutDetails:upi }) });
-      const d = await request('/api/me', initData); setProfile(d.profile); setNotice('Withdrawal request submitted for admin review. Payment is not automatic.');
-    } catch(e) { setNotice(e instanceof Error ? e.message : 'Withdrawal request failed'); }
-    finally { setBusy(false); }
-  }
 
   return <main className="app-shell">
-    <header className="telegram-bar"><div className="tg-close">×</div><div className="tg-title">Hyperliquid</div><div className="tg-chevron">⌄</div><div className="tg-menu">⋮</div></header>
     <div className="app-content">
       {tab === 'tap' && <>
-        <section className="user-strip"><div className="user-avatar">{(profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><div className="wallet-chip">◈ <span>WALLET<br/><b>{profile.points.toLocaleString()} PTS</b></span> ›</div></section>
-        <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-sub">Your virtual mining balance</div></section>
+        <section className="user-strip"><div className="user-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : (profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><button className="wallet-chip points-chip" aria-label="Open ETH wallet" aria-haspopup="dialog" onClick={() => setWalletOpen(true)}>Ξ <span>ETH WALLET<br/><b>{ethBalance} ETH</b></span> ›</button></section>
+        <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-usd">{hypePrice === null ? "Loading live USD value…" : `≈ ${(profile.points * hypePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}</div><div className="balance-rate">{hypePrice === null ? "Live HYPE price unavailable" : `Live HYPE price: ${hypePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USD · updates every 60 sec`}</div></section>
         <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.02 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.02</div></section>
-        <button className="tap-cta" onClick={tap} disabled={busy || profile.energy < 1}>{busy ? 'MINING…' : profile.energy < 1 ? '⏳  Resetting…' : '✦  Tap to mine'}</button>
+        <button type="button" className="tap-cta" onClick={tap} onPointerDown={event => { if (event.pointerType === 'touch') event.preventDefault(); }} disabled={!profileReady || profile.energy < 1}>{!profileReady ? 'Loading balance…' : profile.energy < 1 ? '⏳  Resetting…' : busy ? '✦  Tap to mine · syncing' : '✦  Tap to mine'}</button>
         <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⌛</span><b>{profile.energy === 0 ? resetCountdown : 'READY'}</b><small>RESET TIMER (H:M:S)</small></div></section>
         {profile.energy === 0 && <p className="fine-print">Tap limit reached. Energy refills when the countdown reaches 00:00:00.</p>}
         <div className="energy-track"><div style={{width:`${Math.min(100,profile.energy/Math.max(1,profile.maxEnergy)*100)}%`}}/></div>
@@ -163,25 +296,35 @@ export default function App() {
       </>}
       {tab === 'refer' && <>
         <h1 className="page-heading">Refer &amp; Earn</h1><p className="page-subtitle">Invite friends and grow together</p>
-        <section className="invite-reward"><small>PER INVITE</small><strong><span>✦</span> Referral rewards</strong><p>Referral rewards are not enabled on the server yet.</p></section>
+        <section className="invite-reward"><small>PER INVITE</small><strong><span>✦</span> {referral.enabled ? '+' + referral.reward + ' points' : 'Referral rewards OFF'}</strong><p>{referral.enabled ? 'Earn a one-time reward when a new Telegram user joins with your referral link.' : 'Referral rewards are currently disabled by the admin.'}</p></section>
         <section className="glass-card referral-card"><label>YOUR REFERRAL LINK</label><div className="link-box"><span>{referralLink || 'Set bot username to generate link'}</span><button onClick={copyReferral} aria-label="Copy referral link">▢</button></div><div className="two-buttons"><button className="secondary-btn" onClick={copyReferral}>▢ {refCopied ? 'Copied!' : 'Copy Link'}</button><button className="blue-btn" onClick={() => referralLink ? window.open('https://t.me/share/url?url='+encodeURIComponent(referralLink),'_blank') : setNotice('Configure the bot username first.')}>➤ Share</button></div></section>
-        <section className="glass-card referral-stats"><div><b>0</b><small>Total Referrals</small></div><div><b>0</b><small>Active Referrals</small></div><div><b>0</b><small>Points Earned</small></div></section>
+        <section className="glass-card referral-stats"><div><b>{referral.totalReferrals}</b><small>Total Referrals</small></div><div><b>{referral.activeReferrals}</b><small>Active Referrals</small></div><div><b>{referral.pointsEarned}</b><small>Points Earned</small></div></section>
       </>}
       {tab === 'tasks' && <>
         <h1 className="page-heading">Tasks</h1><p className="page-subtitle">Complete missions to earn rewards</p>
-        <section className="task-card"><div className="task-logo x-logo">𝕏</div><div className="task-details"><strong>Follow our X page</strong><a href="https://x.com/" target="_blank" rel="noreferrer">Open X</a><small>Reward system not enabled</small></div><button className="start-btn" onClick={() => window.open('https://x.com/','_blank')}>Start</button></section>
-        <section className="task-card"><div className="task-logo telegram-logo">➤</div><div className="task-details"><strong>Join our Telegram</strong><a href="https://telegram.org/" target="_blank" rel="noreferrer">Open Telegram</a><small>Reward system not enabled</small></div><button className="start-btn" onClick={() => window.open('https://telegram.org/','_blank')}>Start</button></section>
-        <section className="task-card"><div className="task-logo video-logo">▶</div><div className="task-details"><strong>Watch community videos</strong><a href="https://youtube.com/" target="_blank" rel="noreferrer">Open YouTube</a><small>Reward system not enabled</small></div><button className="start-btn" onClick={() => window.open('https://youtube.com/','_blank')}>Start</button></section>
-        <p className="task-disclaimer">Task verification and rewards are not active yet. These links do not award points.</p>
+        {tasks.map(task => <section className="task-card" key={task.id}><div className="task-logo">{task.icon.startsWith('data:image/') || task.icon.startsWith('http') ? <img src={task.icon} alt="" /> : task.icon}</div><div className="task-details"><strong>{task.title}</strong><a href={task.url} target="_blank" rel="noreferrer">Open mission</a><small className={task.enabled ? 'task-reward-enabled' : 'task-reward-disabled'}>{task.enabled ? ('+' + task.reward + ' points · ' + (task.claimed ? 'Already claimed' : 'Reward enabled')) : 'Reward disabled'}</small></div>{task.enabled && !task.claimed ? <button className="start-btn" disabled={taskBusy === task.id || (isTelegram && !profileReady)} onClick={() => { window.open(task.url,'_blank'); if (!isTelegram) { try { const saved = JSON.parse(localStorage.getItem('hyperliquid-preview-task-claims') || '[]'); const claims: string[] = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []; if (claims.includes(task.id)) { setNotice('This preview task is already claimed.'); return; } localStorage.setItem('hyperliquid-preview-task-claims', JSON.stringify([...new Set([...claims, String(task.id)])])); } catch { setNotice('Preview storage is unavailable.'); return; } setTasks(current => current.map(item => item.id === task.id ? { ...item, claimed: true } : item)); setProfile(current => ({ ...current, points: Math.round((current.points + task.reward) * 100) / 100 })); setNotice('Preview task completed: +' + task.reward + ' points'); return; } setTaskBusy(task.id); request('/api/tasks/' + task.id + '/claim', initData, { method:'POST' }).then(d => { try { const key = 'hyperliquid-task-claims-' + String(telegram?.initDataUnsafe?.user?.id || 'telegram'); const saved = JSON.parse(localStorage.getItem(key) || '[]'); const ids: string[] = Array.isArray(saved) ? saved.map(String) : []; localStorage.setItem(key, JSON.stringify([...new Set([...ids, String(task.id)])])); } catch {} setTasks(current => current.map(item => String(item.id) === String(task.id) ? { ...item, claimed: true } : item)); setNotice('Task completed: +' + d.reward + ' points'); if (d.profile) { setProfile(d.profile); return null; } return request('/api/me', initData); }).then(d => d && setProfile(d.profile)).catch(e => setNotice(e instanceof Error ? e.message : 'Task claim failed')).finally(() => setTaskBusy('')); }}>{taskBusy === task.id ? 'Claiming…' : 'Start & claim'}</button> : <span className="task-status">{task.claimed ? 'Claimed' : 'Off'}</span>}</section>)}
+        {tasks.length === 0 && <p className="task-disclaimer">No tasks configured yet. An admin can enable missions from the control center.</p>}
+        <p className="task-disclaimer">Rewards are credited once per task by the backend. Social follow/join activity may require manual review.</p>
       </>}
       {tab === 'wallet' && <>
-        <h1 className="page-heading">Wallet</h1><section className="wallet-balance glass-card"><label>TOTAL BALANCE</label><strong>{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></strong><small>Virtual points · no fixed USD value</small></section>
-        <button className="withdraw-btn" onClick={() => document.getElementById('withdraw-form')?.scrollIntoView({behavior:'smooth',block:'center'})}>↑ Withdraw points</button>
-        <p className="wallet-section-label">Your wallet</p><section className="wallet-option glass-card"><div className="wallet-brand">UPI</div><div><strong>UPI payout</strong><small>India · admin review required</small></div><span>Available</span></section>
-        <section id="withdraw-form" className="glass-card withdraw-form"><h3>Request withdrawal</h3><p>Minimum 100 points. Approval does not send money automatically.</p><label htmlFor="withdraw-points">Points to withdraw</label><input id="withdraw-points" type="number" min="100" max={profile.points} value={withdrawPoints} onChange={e=>setWithdrawPoints(e.target.value)}/><label htmlFor="upi-id">UPI ID</label><input id="upi-id" autoComplete="off" placeholder="name@bank" value={upi} onChange={e=>setUpi(e.target.value)}/><button className="blue-btn full-btn" disabled={busy || !upi.trim() || Number(withdrawPoints)<100 || Number(withdrawPoints)>profile.points} onClick={withdraw}>{busy ? 'Submitting…' : 'Submit request'}</button></section>
+        <h1 className="page-heading">Mining Points Wallet</h1><section className="wallet-balance glass-card"><label>TOTAL BALANCE</label><strong>{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></strong><small>Virtual points · no fixed USD value</small></section>
+        <p className="wallet-section-label">Your wallet</p>
+        <div className="wallet-page-actions"><button className="secondary-btn" onClick={() => setWalletAction('deposit')}>↓ Deposit ETH</button><button className="blue-btn" onClick={() => setWalletAction('withdraw')}>↑ Withdraw to Hyperliquid</button></div>
+        <CryptoWallet initData={initData} isTelegram={isTelegram} onBalanceChange={setEthBalance} action={walletAction} onActionChange={setWalletAction} />
       </>}
       {notice && <div className="notice" role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss">×</button></div>}
     </div>
     <nav className="bottom-nav">{(['refer','tasks','tap','wallet'] as Tab[]).map(item=><button key={item} className={tab===item?'active':''} onClick={()=>{setTab(item);setNotice('');}}><Icon name={item}/><span>{item==='refer'?'Refer':item==='tasks'?'Task':item==='tap'?'Tap':'Wallet'}</span></button>)}</nav>
+    {walletOpen && <div className="wallet-modal-backdrop" role="presentation" onClick={() => setWalletOpen(false)}>
+      <section className="wallet-modal" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title" onClick={event => event.stopPropagation()}>
+        <div className="wallet-modal-grabber" />
+        <div className="wallet-modal-header"><div><span className="wallet-modal-kicker">ETHEREUM MAINNET</span><h2 id="wallet-modal-title">ETH Wallet</h2></div><button className="wallet-modal-close" aria-label="Close ETH wallet" onClick={() => { setWalletOpen(false); setWalletAction(null); }}>×</button></div>
+        <div className="wallet-modal-profile"><div className="user-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : (profile.firstName[0] || 'M').toUpperCase()}</div><div><strong>{profile.firstName}</strong><small>ID {profile.id}</small><b>● Active</b></div></div>
+        <div className="wallet-modal-balance"><span>TOTAL BALANCE</span><strong>{ethBalance} <em>ETH</em></strong><small>Verified Ethereum balance</small></div>
+        <div className="wallet-modal-actions"><button onClick={() => setWalletAction('deposit')}>↓<span>Deposit</span></button><button onClick={() => setWalletAction('withdraw')}>↑<span>Withdraw</span></button><button onClick={() => document.getElementById('eth-history')?.scrollIntoView({ behavior: 'smooth' })}>◷<span>History</span></button></div>
+        <div className="wallet-modal-asset"><div className="crypto-asset-icon">Ξ</div><div><strong>Ethereum</strong><small>ETH</small></div><b>{ethBalance}<small>ETH</small></b></div>
+        <div className="wallet-modal-content"><CryptoWallet initData={initData} isTelegram={isTelegram} onBalanceChange={setEthBalance} action={walletAction} onActionChange={setWalletAction} /></div>
+      </section>
+    </div>}
   </main>;
 }
