@@ -7,6 +7,40 @@ import { adminAuth, telegramAuth, getTelegramUser } from './telegram.js';
 export const cryptoRouter = Router();
 const CONFIRMATIONS_REQUIRED = 12;
 const HYPERLIQUID_WITHDRAWAL_FEE_ETH = '0.02';
+
+type WithdrawalSchedule = { startAt: string; endAt: string; override: 'auto' | 'on' | 'off' };
+const DEFAULT_WITHDRAWAL_SCHEDULE: WithdrawalSchedule = { startAt: '', endAt: '', override: 'auto' };
+function parseSchedule(raw?: string): WithdrawalSchedule {
+  try {
+    const value = raw ? JSON.parse(raw) : {};
+    return {
+      startAt: typeof value.startAt === 'string' ? value.startAt : '',
+      endAt: typeof value.endAt === 'string' ? value.endAt : '',
+      override: ['auto', 'on', 'off'].includes(value.override) ? value.override : 'auto'
+    };
+  } catch { return { ...DEFAULT_WITHDRAWAL_SCHEDULE }; }
+}
+function scheduleTimestamp(value: string) {
+  return /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$/.test(value) ? Date.parse(value + ':00+05:30') : NaN;
+}
+async function withdrawalAvailability() {
+  const schedule = parseSchedule(await getSetting('crypto_withdrawal_schedule'));
+  const now = Date.now(), start = scheduleTimestamp(schedule.startAt), end = scheduleTimestamp(schedule.endAt);
+  const valid = Number.isFinite(start) && Number.isFinite(end) && end > start;
+  const scheduledOpen = valid && now >= start && now < end;
+  const open = schedule.override === 'on' ? true : schedule.override === 'off' ? false : scheduledOpen;
+  const nextTransitionAt = schedule.override === 'auto' && valid
+    ? (now < start ? new Date(start).toISOString() : now < end ? new Date(end).toISOString() : null)
+    : null;
+  const message = schedule.override === 'on' ? 'Withdrawals manually enabled by admin.'
+    : schedule.override === 'off' ? 'Withdrawals manually disabled by admin.'
+    : !valid ? 'Withdrawals are closed. Admin has not set a valid schedule.'
+    : now < start ? 'Withdrawals open at the scheduled time.'
+    : now < end ? 'Withdrawals are currently open.'
+    : 'The withdrawal schedule has ended.';
+  return { open, schedule, timezone: 'Asia/Kolkata', message, nextTransitionAt, serverNow: new Date(now).toISOString() };
+}
+
 function minimumWithdrawalEth() {
   const value = process.env.MIN_ETH_WITHDRAWAL_ETH || '0.02';
   return /^(?:0|[1-9]\d{0,11})(?:\.\d{1,18})?$/.test(value) && Number(value) > 0 ? value : '0.02';
@@ -51,7 +85,7 @@ cryptoRouter.get('/crypto/public-config', async (_req, res, next) => {
     const c = await config();
     const qrDataUrl = await getSetting('ethereum_deposit_qr');
     const configured = Boolean(c.rpcUrl && c.treasury);
-    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured, configurationMessage: configured ? '' : 'RPC is required only for transaction verification.', treasuryAddress: c.treasury || null, qrDataUrl: qrDataUrl || null, usdcEnabled: false, confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, minimumWithdrawalEth: minimumWithdrawalEth(), wallet: null, balances: [], deposits: [], withdrawals: [] });
+    res.json({ network: 'Ethereum Mainnet', chainId: 1, withdrawalAvailability: await withdrawalAvailability(), configured, configurationMessage: configured ? '' : 'RPC is required only for transaction verification.', treasuryAddress: c.treasury || null, qrDataUrl: qrDataUrl || null, usdcEnabled: false, confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, minimumWithdrawalEth: minimumWithdrawalEth(), wallet: null, balances: [], deposits: [], withdrawals: [] });
   } catch (e) { next(e); }
 });
 cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
@@ -68,7 +102,7 @@ cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
     const balances = await pool.query('SELECT asset, balance FROM crypto_balances WHERE telegram_id=$1 ORDER BY asset', [tg.id]);
     const deposits = await pool.query('SELECT tx_hash, asset, amount, block_number, confirmations, created_at FROM crypto_deposits WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
     const withdrawals = await pool.query('SELECT id, asset, amount, destination_address, status, tx_hash, created_at FROM crypto_withdrawals WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
-    res.json({ network: 'Ethereum Mainnet', chainId: 1, configured: ethereumConfigured, configurationMessage, treasuryAddress: c.treasury || null, qrDataUrl: qrDataUrl || null, usdcEnabled: Boolean(c.usdc), confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, minimumWithdrawalEth: minimumWithdrawalEth(), wallet: wallet.rows[0] ? { address: wallet.rows[0].address, verifiedAt: wallet.rows[0].verified_at } : null, balances: balances.rows.map(b => ({ asset: b.asset, balance: String(b.balance) })), deposits: deposits.rows.map(d => ({ ...d, amount: String(d.amount), txHash: d.tx_hash, blockNumber: String(d.block_number) })), withdrawals: withdrawals.rows.map(w => ({ ...w, amount: String(w.amount), txHash: w.tx_hash })) });
+    res.json({ network: 'Ethereum Mainnet', chainId: 1, withdrawalAvailability: await withdrawalAvailability(), configured: ethereumConfigured, configurationMessage, treasuryAddress: c.treasury || null, qrDataUrl: qrDataUrl || null, usdcEnabled: Boolean(c.usdc), confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, minimumWithdrawalEth: minimumWithdrawalEth(), wallet: wallet.rows[0] ? { address: wallet.rows[0].address, verifiedAt: wallet.rows[0].verified_at } : null, balances: balances.rows.map(b => ({ asset: b.asset, balance: String(b.balance) })), deposits: deposits.rows.map(d => ({ ...d, amount: String(d.amount), txHash: d.tx_hash, blockNumber: String(d.block_number) })), withdrawals: withdrawals.rows.map(w => ({ ...w, amount: String(w.amount), txHash: w.tx_hash })) });
   } catch (e) { next(e); }
 });
 cryptoRouter.post('/crypto/challenge', telegramAuth, async (req, res, next) => {
@@ -148,10 +182,29 @@ cryptoRouter.post('/crypto/deposits/verify', telegramAuth, async (req, res, next
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); next(e); }
   finally { client.release(); }
 });
+cryptoRouter.get('/admin/crypto/withdrawal-settings', adminAuth, async (req, res, next) => {
+  try { if (!requireAdmin(req, res)) return; res.json(await withdrawalAvailability()); }
+  catch (e) { next(e); }
+});
+cryptoRouter.put('/admin/crypto/withdrawal-settings', adminAuth, async (req, res, next) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    const startAt = typeof req.body?.startAt === 'string' ? req.body.startAt : '';
+    const endAt = typeof req.body?.endAt === 'string' ? req.body.endAt : '';
+    const override = req.body?.override;
+    if (!['auto', 'on', 'off'].includes(override)) return res.status(400).json({ error: 'Choose automatic, manual ON, or manual OFF.' });
+    if ((startAt && !Number.isFinite(scheduleTimestamp(startAt))) || (endAt && !Number.isFinite(scheduleTimestamp(endAt)))) return res.status(400).json({ error: 'Enter valid start and end dates and times.' });
+    if (Boolean(startAt) !== Boolean(endAt) || (startAt && scheduleTimestamp(endAt) <= scheduleTimestamp(startAt))) return res.status(400).json({ error: 'Set both dates and ensure the end is after the start.' });
+    await pool.query('INSERT INTO system_settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()', ['crypto_withdrawal_schedule', JSON.stringify({ startAt, endAt, override })]);
+    res.json(await withdrawalAvailability());
+  } catch (e) { next(e); }
+});
 cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const tg = getTelegramUser(req), asset = req.body?.asset, destinationRaw = req.body?.destination, rawAmount = req.body?.amount;
+    const availability = await withdrawalAvailability();
+    if (!availability.open) { await client.query('ROLLBACK'); return res.status(403).json({ error: availability.message, withdrawalAvailability: availability }); }
     if (asset !== 'ETH') return res.status(400).json({ error: 'Hyperliquid withdrawals are currently ETH-only on Ethereum Mainnet.' });
     const amount = decimalAmount(rawAmount, 18);
     const fee = parseUnits(HYPERLIQUID_WITHDRAWAL_FEE_ETH, 18);
