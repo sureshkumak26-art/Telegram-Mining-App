@@ -22,6 +22,7 @@ function Icon({ name }: { name: string }) {
 export default function App() {
   if (window.location.pathname === '/admin') return <Admin />;
   const initData = telegram?.initData || '';
+  const [profileReady, setProfileReady] = useState(!initData);
   const [profile, setProfile] = useState<Profile>(() => {
     if (!initData) {
       try {
@@ -93,11 +94,35 @@ export default function App() {
   const referralLink = botUsername ? `https://t.me/${botUsername}?start=ref_${profile.id}` : '';
 
   useEffect(() => {
+    let active = true;
     if (!initData) {
+      setProfileReady(true);
       setNotice('Preview mode · progress is saved in this browser only. Open inside Telegram to use your server balance.');
-      return;
+      return () => { active = false; };
     }
-    request('/api/me', initData).then((d) => setProfile(d.profile)).catch((e) => setNotice(e.message));
+    setProfileReady(false);
+    request('/api/me', initData)
+      .then((d) => { if (active) { setProfile(d.profile); setProfileReady(true); } })
+      .catch((e) => { if (active) setNotice(e.message); });
+    return () => { active = false; };
+  }, [initData]);
+
+  // Reconcile the visible balance with the database whenever the Mini App resumes.
+  // Do not refresh during an in-flight or queued tap batch, which could overwrite optimistic taps.
+  useEffect(() => {
+    if (!initData) return;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible' || tapInFlight.current || pendingTaps.current > 0) return;
+      request('/api/me', initData).then((d) => {
+        if (!tapInFlight.current && pendingTaps.current === 0) setProfile(d.profile);
+      }).catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
   }, [initData]);
 
   useEffect(() => {
@@ -231,6 +256,9 @@ export default function App() {
   }
 
   function tap() {
+    // Wait for the authenticated database balance before accepting taps; otherwise
+    // the initial /api/me response could overwrite points earned during app startup.
+    if (isTelegram && !profileReady) return;
     // Keep the fast-tap ref aligned with the rendered profile after refreshes or failed syncs.
     visibleEnergy.current = Math.max(0, Math.min(profile.maxEnergy, Math.max(visibleEnergy.current, profile.energy)));
     if (visibleEnergy.current < 1) return;
@@ -260,7 +288,7 @@ export default function App() {
         <section className="user-strip"><div className="user-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : (profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><button className="wallet-chip points-chip" aria-label="Open ETH wallet" aria-haspopup="dialog" onClick={() => setWalletOpen(true)}>Ξ <span>ETH WALLET<br/><b>{ethBalance} ETH</b></span> ›</button></section>
         <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-usd">{hypePrice === null ? "Loading live USD value…" : `≈ ${(profile.points * hypePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}</div><div className="balance-rate">{hypePrice === null ? "Live HYPE price unavailable" : `Live HYPE price: ${hypePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USD · updates every 60 sec`}</div></section>
         <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.02 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.02</div></section>
-        <button type="button" className="tap-cta" onClick={tap} onPointerDown={event => { if (event.pointerType === 'touch') event.preventDefault(); }} disabled={profile.energy < 1}>{profile.energy < 1 ? '⏳  Resetting…' : busy ? '✦  Tap to mine · syncing' : '✦  Tap to mine'}</button>
+        <button type="button" className="tap-cta" onClick={tap} onPointerDown={event => { if (event.pointerType === 'touch') event.preventDefault(); }} disabled={!profileReady || profile.energy < 1}>{!profileReady ? 'Loading balance…' : profile.energy < 1 ? '⏳  Resetting…' : busy ? '✦  Tap to mine · syncing' : '✦  Tap to mine'}</button>
         <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⌛</span><b>{profile.energy === 0 ? resetCountdown : 'READY'}</b><small>RESET TIMER (H:M:S)</small></div></section>
         {profile.energy === 0 && <p className="fine-print">Tap limit reached. Energy refills when the countdown reaches 00:00:00.</p>}
         <div className="energy-track"><div style={{width:`${Math.min(100,profile.energy/Math.max(1,profile.maxEnergy)*100)}%`}}/></div>
@@ -274,7 +302,7 @@ export default function App() {
       </>}
       {tab === 'tasks' && <>
         <h1 className="page-heading">Tasks</h1><p className="page-subtitle">Complete missions to earn rewards</p>
-        {tasks.map(task => <section className="task-card" key={task.id}><div className="task-logo">{task.icon.startsWith('data:image/') || task.icon.startsWith('http') ? <img src={task.icon} alt="" /> : task.icon}</div><div className="task-details"><strong>{task.title}</strong><a href={task.url} target="_blank" rel="noreferrer">Open mission</a><small className={task.enabled ? 'task-reward-enabled' : 'task-reward-disabled'}>{task.enabled ? ('+' + task.reward + ' points · ' + (task.claimed ? 'Already claimed' : 'Reward enabled')) : 'Reward disabled'}</small></div>{task.enabled && !task.claimed ? <button className="start-btn" disabled={taskBusy === task.id} onClick={() => { window.open(task.url,'_blank'); if (!isTelegram) { try { const saved = JSON.parse(localStorage.getItem('hyperliquid-preview-task-claims') || '[]'); const claims: string[] = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []; if (claims.includes(task.id)) { setNotice('This preview task is already claimed.'); return; } localStorage.setItem('hyperliquid-preview-task-claims', JSON.stringify([...new Set([...claims, String(task.id)])])); } catch { setNotice('Preview storage is unavailable.'); return; } setTasks(current => current.map(item => item.id === task.id ? { ...item, claimed: true } : item)); setProfile(current => ({ ...current, points: Math.round((current.points + task.reward) * 100) / 100 })); setNotice('Preview task completed: +' + task.reward + ' points'); return; } setTaskBusy(task.id); request('/api/tasks/' + task.id + '/claim', initData, { method:'POST' }).then(d => { try { const key = 'hyperliquid-task-claims-' + String(telegram?.initDataUnsafe?.user?.id || 'telegram'); const saved = JSON.parse(localStorage.getItem(key) || '[]'); const ids: string[] = Array.isArray(saved) ? saved.map(String) : []; localStorage.setItem(key, JSON.stringify([...new Set([...ids, String(task.id)])])); } catch {} setTasks(current => current.map(item => String(item.id) === String(task.id) ? { ...item, claimed: true } : item)); setNotice('Task completed: +' + d.reward + ' points'); if (d.profile) { setProfile(d.profile); return null; } return request('/api/me', initData); }).then(d => d && setProfile(d.profile)).catch(e => setNotice(e instanceof Error ? e.message : 'Task claim failed')).finally(() => setTaskBusy('')); }}>{taskBusy === task.id ? 'Claiming…' : 'Start & claim'}</button> : <span className="task-status">{task.claimed ? 'Claimed' : 'Off'}</span>}</section>)}
+        {tasks.map(task => <section className="task-card" key={task.id}><div className="task-logo">{task.icon.startsWith('data:image/') || task.icon.startsWith('http') ? <img src={task.icon} alt="" /> : task.icon}</div><div className="task-details"><strong>{task.title}</strong><a href={task.url} target="_blank" rel="noreferrer">Open mission</a><small className={task.enabled ? 'task-reward-enabled' : 'task-reward-disabled'}>{task.enabled ? ('+' + task.reward + ' points · ' + (task.claimed ? 'Already claimed' : 'Reward enabled')) : 'Reward disabled'}</small></div>{task.enabled && !task.claimed ? <button className="start-btn" disabled={taskBusy === task.id || (isTelegram && !profileReady)} onClick={() => { window.open(task.url,'_blank'); if (!isTelegram) { try { const saved = JSON.parse(localStorage.getItem('hyperliquid-preview-task-claims') || '[]'); const claims: string[] = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []; if (claims.includes(task.id)) { setNotice('This preview task is already claimed.'); return; } localStorage.setItem('hyperliquid-preview-task-claims', JSON.stringify([...new Set([...claims, String(task.id)])])); } catch { setNotice('Preview storage is unavailable.'); return; } setTasks(current => current.map(item => item.id === task.id ? { ...item, claimed: true } : item)); setProfile(current => ({ ...current, points: Math.round((current.points + task.reward) * 100) / 100 })); setNotice('Preview task completed: +' + task.reward + ' points'); return; } setTaskBusy(task.id); request('/api/tasks/' + task.id + '/claim', initData, { method:'POST' }).then(d => { try { const key = 'hyperliquid-task-claims-' + String(telegram?.initDataUnsafe?.user?.id || 'telegram'); const saved = JSON.parse(localStorage.getItem(key) || '[]'); const ids: string[] = Array.isArray(saved) ? saved.map(String) : []; localStorage.setItem(key, JSON.stringify([...new Set([...ids, String(task.id)])])); } catch {} setTasks(current => current.map(item => String(item.id) === String(task.id) ? { ...item, claimed: true } : item)); setNotice('Task completed: +' + d.reward + ' points'); if (d.profile) { setProfile(d.profile); return null; } return request('/api/me', initData); }).then(d => d && setProfile(d.profile)).catch(e => setNotice(e instanceof Error ? e.message : 'Task claim failed')).finally(() => setTaskBusy('')); }}>{taskBusy === task.id ? 'Claiming…' : 'Start & claim'}</button> : <span className="task-status">{task.claimed ? 'Claimed' : 'Off'}</span>}</section>)}
         {tasks.length === 0 && <p className="task-disclaimer">No tasks configured yet. An admin can enable missions from the control center.</p>}
         <p className="task-disclaimer">Rewards are credited once per task by the backend. Social follow/join activity may require manual review.</p>
       </>}
