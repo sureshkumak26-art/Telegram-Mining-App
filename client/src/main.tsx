@@ -7,7 +7,25 @@ const tg = (window as any).Telegram?.WebApp;
 
 try { tg?.ready?.(); } catch (error) { console.warn('Telegram ready failed:', error); }
 try { tg?.expand?.(); } catch (error) { console.warn('Telegram expand failed:', error); }
-try { tg?.requestFullscreen?.(); } catch (error) { console.warn('Telegram fullscreen failed:', error); }
+
+// Telegram owns its native header. Fullscreen mode can hide it on supported
+// Telegram clients (Bot API 8.0+); a web page cannot remove it with CSS.
+function requestTelegramFullscreen() {
+  try {
+    if (!tg?.requestFullscreen) return;
+    if (typeof tg.isVersionAtLeast === 'function' && !tg.isVersionAtLeast('8.0')) return;
+    tg.requestFullscreen();
+  } catch (error) {
+    console.warn('Telegram fullscreen request failed:', error);
+  }
+}
+
+// Request on startup, then retry after the first real user interaction in
+// clients that defer fullscreen permission until the user interacts.
+requestTelegramFullscreen();
+const retryFullscreen = () => requestTelegramFullscreen();
+window.addEventListener('pointerdown', retryFullscreen, { once: true, passive: true });
+window.addEventListener('keydown', retryFullscreen, { once: true });
 
 function syncTelegramViewport() {
   const viewportHeight = Number(tg?.viewportStableHeight || tg?.viewportHeight);
