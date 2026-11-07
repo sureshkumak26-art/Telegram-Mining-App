@@ -39,7 +39,10 @@ app.use(cors({
   allowedHeaders: ['content-type','x-telegram-init-data','x-admin-session']
 }));
 app.use(express.json({ limit: '1mb' }));
+// Global API protection plus stricter limits for sensitive admin and wallet endpoints.
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-7', legacyHeaders: false }));
+app.use('/api/admin', rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false }));
+app.use('/api/crypto', rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false }));
 app.use('/api', gameRouter);
 app.use('/api', cryptoRouter);
 app.get('/health', async (_req, res) => { try { await pool.query('SELECT 1'); res.json({ ok: true }); } catch { res.status(503).json({ ok: false }); } });
