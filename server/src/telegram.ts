@@ -36,9 +36,24 @@ export function getTelegramUser(req: Request): TelegramUser { return (req as Req
 
 export function adminAuth(req: Request, res: Response, next: NextFunction) {
   const enabled = process.env.NODE_ENV === 'development' && process.env.ALLOW_LOCAL_ADMIN === 'true';
-  if (!enabled) return telegramAuth(req, res, next);
-  const id = Number(process.env.LOCAL_ADMIN_TELEGRAM_ID || '1');
-  if (!Number.isSafeInteger(id) || id <= 0) return res.status(503).json({ error: 'Invalid local admin configuration.' });
-  (req as Request & { tgUser?: TelegramUser }).tgUser = { id, first_name: 'Local Admin', username: 'local_admin' };
-  next();
+  if (enabled) {
+    const id = Number(process.env.LOCAL_ADMIN_TELEGRAM_ID || '1');
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(503).json({ error: 'Invalid local admin configuration.' });
+    (req as Request & { tgUser?: TelegramUser }).tgUser = { id, first_name: 'Local Admin', username: 'local_admin' };
+    return next();
+  }
+
+  // Admin Mini Apps may be launched by a separate Admin bot. Keep client
+  // authentication on TELEGRAM_BOT_TOKEN and verify admin initData with the
+  // dedicated token when configured. The fallback preserves single-bot setups.
+  try {
+    const token = process.env.ADMIN_TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+    if (!token || token === 'replace_me') return res.status(503).json({ error: 'Admin Telegram bot is not configured on the server.' });
+    const initData = req.header('x-telegram-init-data') || '';
+    const maxAge = Number(process.env.TELEGRAM_INITDATA_MAX_AGE_SECONDS || 86400);
+    (req as Request & { tgUser?: TelegramUser }).tgUser = verifyInitData(initData, token, maxAge);
+    next();
+  } catch (e) {
+    res.status(401).json({ error: e instanceof Error ? e.message : 'Unauthorized' });
+  }
 }
