@@ -183,7 +183,7 @@ cryptoRouter.post('/crypto/deposits/verify', telegramAuth, async (req, res, next
   finally { client.release(); }
 });
 cryptoRouter.get('/admin/crypto/withdrawal-settings', adminAuth, async (req, res, next) => {
-  try { if (!requireAdmin(req, res)) return; res.json(await withdrawalAvailability()); }
+  try { if (!requireAdmin(req, res)) return; const status = await withdrawalAvailability(); res.json({ ...status, ...status.schedule }); }
   catch (e) { next(e); }
 });
 cryptoRouter.put('/admin/crypto/withdrawal-settings', adminAuth, async (req, res, next) => {
@@ -196,7 +196,8 @@ cryptoRouter.put('/admin/crypto/withdrawal-settings', adminAuth, async (req, res
     if ((startAt && !Number.isFinite(scheduleTimestamp(startAt))) || (endAt && !Number.isFinite(scheduleTimestamp(endAt)))) return res.status(400).json({ error: 'Enter valid start and end dates and times.' });
     if (Boolean(startAt) !== Boolean(endAt) || (startAt && scheduleTimestamp(endAt) <= scheduleTimestamp(startAt))) return res.status(400).json({ error: 'Set both dates and ensure the end is after the start.' });
     await pool.query('INSERT INTO system_settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()', ['crypto_withdrawal_schedule', JSON.stringify({ startAt, endAt, override })]);
-    res.json(await withdrawalAvailability());
+    const status = await withdrawalAvailability();
+    res.json({ ...status, ...status.schedule });
   } catch (e) { next(e); }
 });
 cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) => {
