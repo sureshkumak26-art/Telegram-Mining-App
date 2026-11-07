@@ -86,6 +86,7 @@ export default function App() {
   const visibleEnergy = useRef(profile.energy);
   const [tapAnimation, setTapAnimation] = useState(0);
   const [now, setNow] = useState(Date.now());
+  const [hypePrice, setHypePrice] = useState<number | null>(null);
   const [refCopied, setRefCopied] = useState(false);
   const isTelegram = Boolean(initData);
   const [botUsername, setBotUsername] = useState(import.meta.env.VITE_TELEGRAM_BOT_USERNAME || '');
@@ -126,6 +127,24 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadHypePrice = async () => {
+      try {
+        const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=hyperliquid&vs_currencies=usd', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Live price unavailable');
+        const data = await response.json();
+        const price = Number(data?.hyperliquid?.usd);
+        if (active && Number.isFinite(price) && price > 0) setHypePrice(price);
+      } catch {
+        // Keep the last successful quote; the next refresh will retry.
+      }
+    };
+    void loadHypePrice();
+    const timer = window.setInterval(() => { void loadHypePrice(); }, 60_000);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
 
   useEffect(() => {
@@ -223,7 +242,7 @@ export default function App() {
     <div className="app-content">
       {tab === 'tap' && <>
         <section className="user-strip"><div className="user-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : (profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><button className="wallet-chip points-chip" aria-label="Open ETH wallet" aria-haspopup="dialog" onClick={() => setWalletOpen(true)}>Ξ <span>ETH WALLET<br/><b>{ethBalance} ETH</b></span> ›</button></section>
-        <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-sub">Your virtual mining balance</div><div className="balance-rate">Reference price: 1 HYPE = $81 USD</div></section>
+        <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-sub">Your virtual mining balance</div><div className="balance-usd">{hypePrice === null ? "Loading live USD value…" : `≈ ${(profile.points * hypePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}</div><div className="balance-rate">{hypePrice === null ? "Live HYPE price unavailable" : `Live HYPE price: ${hypePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USD · updates every 60 sec`}</div></section>
         <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.02 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.02</div></section>
         <button type="button" className="tap-cta" onClick={tap} onPointerDown={event => { if (event.pointerType === 'touch') event.preventDefault(); }} disabled={profile.energy < 1}>{profile.energy < 1 ? '⏳  Resetting…' : busy ? '✦  Tap to mine · syncing' : '✦  Tap to mine'}</button>
         <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⌛</span><b>{profile.energy === 0 ? resetCountdown : 'READY'}</b><small>RESET TIMER (H:M:S)</small></div></section>
