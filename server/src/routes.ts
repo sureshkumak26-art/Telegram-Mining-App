@@ -39,14 +39,16 @@ gameRouter.post('/tasks/:id/claim', telegramAuth, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const tg = getTelegramUser(req); await client.query('BEGIN');
+    await client.query('INSERT INTO users(telegram_id, first_name, username) VALUES($1,$2,$3) ON CONFLICT(telegram_id) DO NOTHING', [tg.id, tg.first_name.slice(0,100), tg.username?.slice(0,100) || null]);
     const task = await client.query('SELECT id, title, reward, enabled FROM task_configs WHERE id=$1 FOR UPDATE', [req.params.id]);
     if (!task.rowCount || !task.rows[0].enabled) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This task is not enabled.' }); }
     const reward = Number(task.rows[0].reward); if (!Number.isFinite(reward) || reward <= 0) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'This task has no reward configured.' }); }
     const inserted = await client.query('INSERT INTO task_claims(task_id, telegram_id, reward) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING task_id', [req.params.id, tg.id, reward]);
     if (!inserted.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'You already claimed this task.' }); }
-    await client.query('UPDATE users SET points=points+$2, updated_at=NOW() WHERE telegram_id=$1', [tg.id, reward]);
+    const updated = await client.query('UPDATE users SET points=points+$2::numeric, updated_at=NOW() WHERE telegram_id=$1 RETURNING telegram_id, first_name, username, photo_url, points, energy, taps, energy_reset_at', [tg.id, reward]);
+    if (!updated.rowCount) throw new Error('Could not credit task reward to user balance.');
     await client.query('INSERT INTO ledger(telegram_id, delta, reason) VALUES($1,$2,$3)', [tg.id, reward, 'task-reward:'+req.params.id]);
-    await client.query('COMMIT'); res.json({ ok: true, reward });
+    await client.query('COMMIT'); res.json({ ok: true, reward, profile: { id: String(updated.rows[0].telegram_id), firstName: updated.rows[0].first_name, username: updated.rows[0].username || undefined, avatarUrl: updated.rows[0].photo_url || undefined, points: Number(updated.rows[0].points), energy: Number(updated.rows[0].energy), maxEnergy: 1000, taps: Number(updated.rows[0].taps), resetAt: updated.rows[0].energy_reset_at ? new Date(updated.rows[0].energy_reset_at).toISOString() : null } });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); next(e); } finally { client.release(); }
 });
 gameRouter.get('/admin/tasks', adminAuth, async (req, res, next) => { try { if (!requireAdmin(req,res)) return; const result=await pool.query('SELECT id,title,description,url,icon,reward,enabled FROM task_configs ORDER BY id'); res.json({ tasks: result.rows.map(taskRow) }); } catch(e){ next(e); } });
