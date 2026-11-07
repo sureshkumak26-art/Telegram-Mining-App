@@ -21,7 +21,7 @@ function parseSchedule(raw?: string): WithdrawalSchedule {
   } catch { return { ...DEFAULT_WITHDRAWAL_SCHEDULE }; }
 }
 function scheduleTimestamp(value: string) {
-  return /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$/.test(value) ? Date.parse(value + ':00+05:30') : NaN;
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) ? Date.parse(value + ':00+05:30') : NaN;
 }
 async function withdrawalAvailability() {
   const schedule = parseSchedule(await getSetting('crypto_withdrawal_schedule'));
