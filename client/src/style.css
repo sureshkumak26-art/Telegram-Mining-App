@@ -94,3 +94,11 @@ body {
     padding-top: 0;
   }
 }
+
+/* ETH wallet controls: use solid black instead of gray */
+.wallet-chip,
+.wallet-modal-close {
+  background: #000 !important;
+  color: #fff !important;
+  border-color: #25282c !important;
+}
