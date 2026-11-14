@@ -241,7 +241,7 @@ export default function App() {
       const stillQueued = pendingTaps.current;
       const energy = Math.max(0, Number(d.profile.energy) - stillQueued);
       const resetAt = energy === 0 ? (d.profile.resetAt || new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : d.profile.resetAt;
-      const nextProfile = { ...d.profile, points: Math.round((Number(d.profile.points) + stillQueued * 0.08) * 100) / 100, energy, taps: Number(d.profile.taps) + stillQueued, resetAt };
+      const nextProfile = { ...d.profile, points: Math.round((Number(d.profile.points) + stillQueued * 0.008) * 1000) / 1000, energy, taps: Number(d.profile.taps) + stillQueued, resetAt };
       visibleEnergy.current = energy;
       setProfile(nextProfile);
     } catch (e) {
@@ -249,7 +249,7 @@ export default function App() {
       setProfile(p => {
         const energy = Math.min(p.maxEnergy, p.energy + count);
         visibleEnergy.current = Math.min(p.maxEnergy, visibleEnergy.current + count);
-        return { ...p, points: Math.max(0, Math.round((p.points - count * 0.08) * 100) / 100), energy, taps: Math.max(0, p.taps - count), resetAt: energy > 0 ? null : p.resetAt };
+        return { ...p, points: Math.max(0, Math.round((p.points - count * 0.008) * 1000) / 1000), energy, taps: Math.max(0, p.taps - count), resetAt: energy > 0 ? null : p.resetAt };
       });
       setNotice(e instanceof Error ? e.message : 'Tap failed. Please try again.');
     } finally {
@@ -272,7 +272,7 @@ export default function App() {
     setProfile(p => {
       if (p.energy < 1) return p;
       const energy = Math.max(0, p.energy - 1);
-      return { ...p, points: Math.round((p.points + 0.08) * 100) / 100, energy, taps: p.taps + 1, resetAt: energy === 0 ? (p.resetAt && new Date(p.resetAt).getTime() > Date.now() ? p.resetAt : new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : p.resetAt };
+      return { ...p, points: Math.round((p.points + 0.008) * 1000) / 1000, energy, taps: p.taps + 1, resetAt: energy === 0 ? (p.resetAt && new Date(p.resetAt).getTime() > Date.now() ? p.resetAt : new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : p.resetAt };
     });
     if (!isTelegram) return;
     setNotice('');
@@ -290,8 +290,8 @@ export default function App() {
     <div className="app-content">
       {tab === 'tap' && <>
         <section className="user-strip"><div className="user-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : (profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><button className="wallet-chip points-chip" aria-label="Open ETH wallet" aria-haspopup="dialog" onClick={() => setWalletOpen(true)}>Ξ <span>ETH WALLET<br/><b>{ethBalance} ETH</b></span> ›</button></section>
-        <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-usd">{hypePrice === null ? "Loading live USD value…" : `≈ ${(profile.points * hypePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}</div><div className="balance-rate">{hypePrice === null ? "Live HYPE price unavailable" : `Live HYPE price: ${hypePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USD · updates every 60 sec`}</div></section>
-        <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.08 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.08</div></section>
+        <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} <span>HYPERLIQUID</span></div><div className="balance-usd">{hypePrice === null ? "Loading live USD value…" : `≈ ${(profile.points * hypePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}</div><div className="balance-rate">{hypePrice === null ? "Live HYPE price unavailable" : `Live HYPE price: ${hypePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USD · updates every 60 sec`}</div></section>
+        <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.008 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.008</div></section>
         <button type="button" className="tap-cta" onClick={tap} onPointerDown={event => { if (event.pointerType === 'touch') event.preventDefault(); }} disabled={!profileReady || profile.energy < 1}>{!profileReady ? 'Loading balance…' : profile.energy < 1 ? '⏳  Resetting…' : busy ? '✦  Tap to mine · syncing' : '✦  Tap to mine'}</button>
         <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⌛</span><b>{profile.energy === 0 ? resetCountdown : 'READY'}</b><small>RESET TIMER (H:M:S)</small></div></section>
         {profile.energy === 0 && <p className="fine-print">Tap limit reached. Energy refills when the countdown reaches 00:00:00.</p>}
@@ -311,7 +311,7 @@ export default function App() {
         <p className="task-disclaimer">Rewards are credited once per task by the backend. Social follow/join activity may require manual review.</p>
       </>}
       {tab === 'wallet' && <>
-        <h1 className="page-heading">Mining Points Wallet</h1><section className="wallet-balance glass-card"><label>TOTAL BALANCE</label><strong>{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></strong><small>Virtual points · no fixed USD value</small></section>
+        <h1 className="page-heading">Mining Points Wallet</h1><section className="wallet-balance glass-card"><label>TOTAL BALANCE</label><strong>{profile.points.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} <span>HYPERLIQUID</span></strong><small>Virtual points · no fixed USD value</small></section>
         <p className="wallet-section-label">Your wallet</p>
         <div className="wallet-page-actions"><button className="secondary-btn" onClick={() => setWalletAction('deposit')}>↓ Deposit ETH</button><button className="blue-btn" onClick={() => setWalletAction('withdraw')}>↑ Withdraw to Hyperliquid</button></div>
         <CryptoWallet initData={initData} isTelegram={isTelegram} onBalanceChange={setEthBalance} action={walletAction} onActionChange={setWalletAction} />
