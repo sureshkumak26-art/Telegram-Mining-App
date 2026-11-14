@@ -90,7 +90,7 @@ gameRouter.patch('/admin/settings', adminAuth, async (req, res, next) => {
     if (!candidates.length || candidates.length > 100 || candidates.some((value: unknown) => typeof value !== 'string' || !isAddress(value.trim()))) {
       return res.status(400).json({ error: 'Add between 1 and 100 valid public Ethereum addresses. Use one address per line.' });
     }
-    const addresses = [...new Set(candidates.map((value: string) => getAddress(value.trim())))];
+    const addresses = [...new Set([...(await configuredDepositAddresses()), ...candidates.map((value: string) => getAddress(value.trim()))])];
     await setSetting('ethereum_deposit_addresses', JSON.stringify(addresses));
     await setSetting('ethereum_deposit_address', addresses[0]);
     // A manually uploaded QR would become stale as soon as the address rotates.
