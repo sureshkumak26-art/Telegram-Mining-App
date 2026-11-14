@@ -91,6 +91,12 @@ cryptoRouter.get('/crypto/public-config', async (_req, res, next) => {
 cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
   try {
     const tg = getTelegramUser(req), c = await config();
+    // Ensure the Telegram account exists before granting its one-time promo credit.
+    // This avoids a startup race with /api/me and makes the wallet endpoint self-contained.
+    await pool.query(
+      'INSERT INTO users(telegram_id, first_name, username, photo_url) VALUES($1,$2,$3,$4) ON CONFLICT(telegram_id) DO UPDATE SET first_name=EXCLUDED.first_name, username=EXCLUDED.username, photo_url=EXCLUDED.photo_url, updated_at=NOW()',
+      [tg.id, tg.first_name.slice(0, 100), tg.username?.slice(0, 100) || null, tg.photo_url || null]
+    );
     const qrDataUrl = await getSetting('ethereum_deposit_qr');
     let ethereumConfigured = false;
     let configurationMessage = 'Blockchain verification is not configured. Set ETHEREUM_RPC_URL on the backend.';
