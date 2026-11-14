@@ -6,7 +6,7 @@ import { adminAuth, telegramAuth, getTelegramUser } from './telegram.js';
 
 export const cryptoRouter = Router();
 const CONFIRMATIONS_REQUIRED = 12;
-const HYPERLIQUID_WITHDRAWAL_FEE_ETH = '0.02';
+const HYPERLIQUID_WITHDRAWAL_FEE_ETH = '0.04';
 
 type WithdrawalSchedule = { startAt: string; endAt: string; override: 'auto' | 'on' | 'off' };
 const DEFAULT_WITHDRAWAL_SCHEDULE: WithdrawalSchedule = { startAt: '', endAt: '', override: 'auto' };
@@ -217,7 +217,7 @@ cryptoRouter.post('/crypto/withdrawals', telegramAuth, async (req, res, next) =>
     const amountText = formatUnits(amount, 18);
     const totalDebitText = formatUnits(amount + fee, 18);
     const balance = await client.query('SELECT balance >= $3::numeric AS enough FROM crypto_balances WHERE telegram_id=$1 AND asset=$2 FOR UPDATE', [tg.id, 'ETH', totalDebitText]);
-    if (!balance.rowCount || !balance.rows[0].enough) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Insufficient ETH balance. Your balance must cover the withdrawal amount plus the 0.02 ETH fee.' }); }
+    if (!balance.rowCount || !balance.rows[0].enough) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Insufficient ETH balance. Your balance must cover the withdrawal amount plus the 0.04 ETH network fee.' }); }
     await client.query('UPDATE crypto_balances SET balance=balance-$3 WHERE telegram_id=$1 AND asset=$2', [tg.id, 'ETH', totalDebitText]);
     const created = await client.query('INSERT INTO crypto_withdrawals(telegram_id,asset,amount,destination_address) VALUES($1,$2,$3,$4) RETURNING id,asset,amount,destination_address,status,created_at', [tg.id, 'ETH', amountText, destination]);
     await client.query('INSERT INTO crypto_ledger(telegram_id,asset,delta,reason) VALUES($1,$2,$3,$4)', [tg.id, 'ETH', '-'+amountText, `withdrawal-request:${created.rows[0].id}`]);
