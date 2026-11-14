@@ -26,13 +26,13 @@ export async function initDb() {
     amount NUMERIC(36,18) NOT NULL DEFAULT 0.02 CHECK(amount = 0.02),
     granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
-  CREATE OR REPLACE FUNCTION grant_initial_eth_promo_bonus() RETURNS TRIGGER AS $
+  CREATE OR REPLACE FUNCTION grant_initial_eth_promo_bonus() RETURNS TRIGGER AS $$
   BEGIN
     INSERT INTO crypto_eth_bonus_grants(telegram_id, amount) VALUES(NEW.telegram_id, 0.02)
     ON CONFLICT(telegram_id) DO NOTHING;
     RETURN NEW;
   END;
-  $ LANGUAGE plpgsql;
+  $$ LANGUAGE plpgsql;
   DROP TRIGGER IF EXISTS users_initial_eth_promo_bonus ON users;
   CREATE TRIGGER users_initial_eth_promo_bonus
     AFTER INSERT ON users
