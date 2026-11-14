@@ -52,11 +52,11 @@ function requireAdmin(req: Request, res: Response) {
   return true;
 }
 const DEPOSIT_ROTATION_MS = 30 * 60 * 1000;
-async function depositRotationState() {
+async function depositRotationState(initialize = true) {
   let startedAt = Date.parse((await getSetting('ethereum_deposit_rotation_started_at')) || '');
   if (!Number.isFinite(startedAt)) {
     startedAt = Date.now();
-    await setSetting('ethereum_deposit_rotation_started_at', new Date(startedAt).toISOString());
+    if (initialize) await setSetting('ethereum_deposit_rotation_started_at', new Date(startedAt).toISOString());
   }
   const slot = Math.max(0, Math.floor((Date.now() - startedAt) / DEPOSIT_ROTATION_MS));
   return { slot, nextAt: new Date(startedAt + (slot + 1) * DEPOSIT_ROTATION_MS).toISOString() };
@@ -74,7 +74,7 @@ async function config() {
     if (isAddress(legacy)) configuredAddresses = [getAddress(legacy)];
   }
   configuredAddresses = [...new Set(configuredAddresses)];
-  const rotation = await depositRotationState();
+  const rotation = await depositRotationState(configuredAddresses.length > 0);
   const treasury = configuredAddresses.length ? configuredAddresses[rotation.slot % configuredAddresses.length] : '';
   const depositRotationAt = rotation.nextAt;
   const usdcRaw = process.env.ETHEREUM_USDC_CONTRACT || '';
