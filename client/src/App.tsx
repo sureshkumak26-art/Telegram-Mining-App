@@ -296,7 +296,7 @@ export default function App() {
         <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⌛</span><b>{profile.energy === 0 ? resetCountdown : 'READY'}</b><small>RESET TIMER (H:M:S)</small></div></section>
         {profile.energy === 0 && <p className="fine-print">Tap limit reached. Energy refills when the countdown reaches 00:00:00.</p>}
         <div className="energy-track"><div style={{width:`${Math.min(100,profile.energy/Math.max(1,profile.maxEnergy)*100)}%`}}/></div>
-        <p className="fine-print">Each tap earns 0.08 virtual points. 1,000 taps per cycle; full reset after 5 hours. Points have no guaranteed cash value.</p>
+        <p className="fine-print">Each tap earns 0.008 virtual points. 1,000 taps per cycle; full reset after 5 hours. Points have no guaranteed cash value.</p>
       </>}
       {tab === 'refer' && <>
         <h1 className="page-heading">Refer &amp; Earn</h1><p className="page-subtitle">Invite friends and grow together</p>
