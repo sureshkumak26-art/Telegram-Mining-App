@@ -68,11 +68,11 @@ async function configuredDepositAddresses(): Promise<string[]> {
   }
   return [...new Set(addresses)];
 }
-async function depositRotationState() {
+async function depositRotationState(initialize = true) {
   let startedAt = Date.parse((await getSetting('ethereum_deposit_rotation_started_at')) || '');
   if (!Number.isFinite(startedAt)) {
     startedAt = Date.now();
-    await setSetting('ethereum_deposit_rotation_started_at', new Date(startedAt).toISOString());
+    if (initialize) await setSetting('ethereum_deposit_rotation_started_at', new Date(startedAt).toISOString());
   }
   const slot = Math.max(0, Math.floor((Date.now() - startedAt) / DEPOSIT_ADDRESS_ROTATION_MS));
   return { slot, nextAt: new Date(startedAt + (slot + 1) * DEPOSIT_ADDRESS_ROTATION_MS).toISOString() };
@@ -84,7 +84,7 @@ gameRouter.get('/admin/settings', adminAuth, async (req, res, next) => {
   try {
     if (!requireAdmin(req, res)) return;
     const addresses = await configuredDepositAddresses();
-    const rotation = await depositRotationState();
+    const rotation = await depositRotationState(addresses.length > 0);
     res.json({ ethereumDepositAddress: activeDepositAddress(addresses, rotation.slot), ethereumDepositAddresses: addresses, depositRotationAt: rotation.nextAt, rotationMinutes: 30 });
   } catch (e) { next(e); }
 });
@@ -121,7 +121,7 @@ gameRouter.get('/admin/dashboard', adminAuth, async (req, res, next) => {
     ]);
     const s = stats.rows[0];
     const depositAddresses = await configuredDepositAddresses();
-    const depositRotation = await depositRotationState();
+    const depositRotation = await depositRotationState(depositAddresses.length > 0);
     res.json({
       stats: { totalUsers: Number(s.total_users), totalPoints: Number(s.total_points), totalTaps: Number(s.total_taps), active24h: Number(s.active_24h), pendingWithdrawals: (withdrawals.rowCount || 0) + Number(cryptoStats.rows[0].pending_crypto || 0), totalDeposits: String(cryptoStats.rows[0].deposits), totalWithdrawals: String(cryptoStats.rows[0].withdrawals) },
       users: users.rows.map(u => ({ ...u, telegram_id: String(u.telegram_id), points: Number(u.points), taps: Number(u.taps), energy: Number(u.energy) })),
