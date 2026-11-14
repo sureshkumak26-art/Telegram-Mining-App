@@ -54,25 +54,48 @@ gameRouter.post('/tasks/:id/claim', telegramAuth, async (req, res, next) => {
 gameRouter.get('/admin/tasks', adminAuth, async (req, res, next) => { try { if (!requireAdmin(req,res)) return; const result=await pool.query('SELECT id,title,description,url,icon,reward,enabled FROM task_configs ORDER BY id'); res.json({ tasks: result.rows.map(taskRow) }); } catch(e){ next(e); } });
 gameRouter.patch('/admin/tasks/:id', adminAuth, async (req, res, next) => { try { if (!requireAdmin(req,res)) return; const reward=Number(req.body?.reward); const enabled=req.body?.enabled; const title=typeof req.body?.title==='string' ? req.body.title.trim() : ''; const url=typeof req.body?.url==='string' ? req.body.url.trim() : ''; const icon=typeof req.body?.icon==='string' ? req.body.icon.trim() : ''; const iconImage=/^data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(icon); const iconUrl=/^https:\/\//.test(icon); if (!Number.isFinite(reward)||reward<0||reward>100000||typeof enabled!=='boolean'||!title||!url||!/^https?:\/\//.test(url)||!icon||(iconImage && icon.length>350000)||(!iconImage && !iconUrl && icon.length>32)|| (iconUrl && icon.length>1000)) return res.status(400).json({error:'Invalid task configuration or icon. Use an emoji, HTTPS image URL, or image under 250 KB.'}); const result=await pool.query('UPDATE task_configs SET title=$2,url=$3,icon=$4,reward=$5,enabled=$6,updated_at=NOW() WHERE id=$1 RETURNING id,title,description,url,icon,reward,enabled',[req.params.id,title,url,icon,reward,enabled]); if(!result.rowCount)return res.status(404).json({error:'Task not found.'}); res.json({task:taskRow(result.rows[0])}); } catch(e){ next(e); } });
 
+const DEPOSIT_ADDRESS_ROTATION_MS = 30 * 60 * 1000;
+async function configuredDepositAddresses(): Promise<string[]> {
+  const savedPool = await getSetting('ethereum_deposit_addresses');
+  let addresses: string[] = [];
+  try {
+    const parsed = savedPool ? JSON.parse(savedPool) : [];
+    if (Array.isArray(parsed)) addresses = parsed.filter((value): value is string => typeof value === 'string' && isAddress(value)).map(getAddress);
+  } catch { /* Use the legacy single-address setting below. */ }
+  if (!addresses.length) {
+    const legacy = (await getSetting('ethereum_deposit_address')) || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS || '';
+    if (isAddress(legacy)) addresses = [getAddress(legacy)];
+  }
+  return [...new Set(addresses)];
+}
+function activeDepositAddress(addresses: string[]) {
+  if (!addresses.length) return null;
+  const slot = Math.floor(Date.now() / DEPOSIT_ADDRESS_ROTATION_MS);
+  return addresses[slot % addresses.length];
+}
 gameRouter.get('/admin/settings', adminAuth, async (req, res, next) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const saved = await getSetting('ethereum_deposit_address');
-    const value = saved || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS || '';
-    res.json({ ethereumDepositAddress: isAddress(value) ? getAddress(value) : null });
+    const addresses = await configuredDepositAddresses();
+    res.json({ ethereumDepositAddress: activeDepositAddress(addresses), ethereumDepositAddresses: addresses });
   } catch (e) { next(e); }
 });
 
 gameRouter.patch('/admin/settings', adminAuth, async (req, res, next) => {
   try {
     if (!requireAdmin(req, res)) return;
-    const raw = typeof req.body?.ethereumDepositAddress === 'string' ? req.body.ethereumDepositAddress.trim() : '';
-    const qr = typeof req.body?.qrDataUrl === 'string' ? req.body.qrDataUrl.trim() : '';
-    if (!isAddress(raw)) return res.status(400).json({ error: 'Enter a valid Ethereum deposit address.' });
-    if (qr && (!/^data:image\/(?:png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(qr) || qr.length > 700000)) return res.status(400).json({ error: 'QR upload must be a PNG, JPEG, or WebP image under 500 KB.' });
-    await setSetting('ethereum_deposit_address', getAddress(raw));
-    await setSetting('ethereum_deposit_qr', qr);
-    res.json({ ok: true, ethereumDepositAddress: getAddress(raw), qrUploaded: Boolean(qr) });
+    const rawList = req.body?.ethereumDepositAddresses;
+    const legacyRaw = typeof req.body?.ethereumDepositAddress === 'string' ? req.body.ethereumDepositAddress.trim() : '';
+    const candidates = Array.isArray(rawList) ? rawList : (legacyRaw ? [legacyRaw] : []);
+    if (!candidates.length || candidates.length > 100 || candidates.some((value: unknown) => typeof value !== 'string' || !isAddress(value.trim()))) {
+      return res.status(400).json({ error: 'Add between 1 and 100 valid public Ethereum addresses. Use one address per line.' });
+    }
+    const addresses = [...new Set(candidates.map((value: string) => getAddress(value.trim())))];
+    await setSetting('ethereum_deposit_addresses', JSON.stringify(addresses));
+    await setSetting('ethereum_deposit_address', addresses[0]);
+    // A manually uploaded QR would become stale as soon as the address rotates.
+    await setSetting('ethereum_deposit_qr', '');
+    res.json({ ok: true, ethereumDepositAddress: activeDepositAddress(addresses), ethereumDepositAddresses: addresses, rotationMinutes: 30 });
   } catch (e) { next(e); }
 });
 
@@ -94,7 +117,7 @@ gameRouter.get('/admin/dashboard', adminAuth, async (req, res, next) => {
       ledger: ledger.rows.map(l => ({ ...l, telegram_id: String(l.telegram_id), delta: Number(l.delta) })),
       withdrawals: withdrawals.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), points: Number(w.points) })),
       cryptoWithdrawals: cryptoWithdrawals.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), amount: String(w.amount), fee: w.asset === 'ETH' ? '0.02' : '0', txHash: w.tx_hash })),
-      settings: { ethereumTreasuryAddress: isAddress((await getSetting('ethereum_deposit_address')) || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS || '') ? getAddress(((await getSetting('ethereum_deposit_address')) || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS) as string) : null, ethereumDepositQr: (await getSetting('ethereum_deposit_qr')) || null, network: 'Ethereum Mainnet' }
+      settings: { ethereumTreasuryAddress: activeDepositAddress(await configuredDepositAddresses()), ethereumDepositAddresses: await configuredDepositAddresses(), ethereumDepositQr: null, network: 'Ethereum Mainnet', rotationMinutes: 30 }
     });
   } catch (e) { next(e); }
 });
