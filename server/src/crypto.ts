@@ -58,7 +58,7 @@ async function config() {
   let configuredAddresses: string[] = [];
   try {
     const parsed = savedPool ? JSON.parse(savedPool) : [];
-    if (Array.isArray(parsed)) configuredAddresses = parsed.filter((value): value is string => typeof value === 'string' && isAddress(value)).map(getAddress);
+    if (Array.isArray(parsed)) configuredAddresses = parsed.filter((value): value is string => typeof value === 'string' && isAddress(value)).map(value => getAddress(value));
   } catch { /* Fall back to the legacy single-address setting. */ }
   if (!configuredAddresses.length) {
     const legacy = savedAddress || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS || '';
