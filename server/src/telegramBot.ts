@@ -4,11 +4,12 @@ const commands = [
 ];
 
 const welcomeMessage = [
-  "🎉 Registration is almost complete! Open the app to launch your personal AI agent 🤖📈",
+  "🎉 Welcome to Telegram Miner!",
   "",
-  "💵 Top up your USDT balance to level up your agent and boost your daily income 🚀",
+  "⛏️ Tap to mine points and track your mining balance.",
+  "💎 Open your ETH wallet to view your wallet details.",
   "",
-  "👥 Invite partners and friends — earn rewards for their registrations and eligible trading activity! 🎁✨",
+  "👥 Invite friends and earn referral rewards!",
 ].join("\n");
 
 async function telegramRequest(endpoint: string, method: string, body?: unknown) {
@@ -26,6 +27,7 @@ async function telegramRequest(endpoint: string, method: string, body?: unknown)
 
 async function startCommandPolling(endpoint: string, webAppUrl: string) {
   let offset = 0;
+  console.log("Telegram /start polling loop started.");
   while (true) {
     try {
       const updates = await telegramRequest(endpoint, "getUpdates", {
@@ -37,9 +39,10 @@ async function startCommandPolling(endpoint: string, webAppUrl: string) {
       for (const update of updates) {
         offset = Math.max(offset, Number(update.update_id) + 1);
         const message = update.message;
-        const text = typeof message?.text === "string" ? message.text.trim() : "";
-        if (!message?.chat?.id || !/^\/start(?:@\w+)?(?:\s|$)/i.test(text)) continue;
+        const messageText = typeof message?.text === "string" ? message.text.trim() : "";
+        if (!message?.chat?.id || !/^\/(?:start|help)(?:@\w+)?(?:\s|$)/i.test(messageText)) continue;
 
+        console.log(`Telegram command received: ${messageText.split(/\\s/)[0]}`);
         await telegramRequest(endpoint, "sendMessage", {
           chat_id: message.chat.id,
           text: welcomeMessage,
@@ -49,6 +52,7 @@ async function startCommandPolling(endpoint: string, webAppUrl: string) {
             ]],
           },
         });
+        console.log("Telegram welcome message sent.");
       }
     } catch (error) {
       console.error("Telegram bot polling error:", error instanceof Error ? error.message : error);
@@ -60,7 +64,12 @@ async function startCommandPolling(endpoint: string, webAppUrl: string) {
 export async function configureTelegramBot() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const webAppUrl = process.env.TELEGRAM_WEB_APP_URL;
-  if (!token || token === "replace_me" || !webAppUrl) return;
+  if (!token || token === "replace_me") {
+    throw new Error("TELEGRAM_BOT_TOKEN is missing or still set to replace_me in Render environment variables.");
+  }
+  if (!webAppUrl) {
+    throw new Error("TELEGRAM_WEB_APP_URL is missing in Render environment variables.");
+  }
   if (!/^https:\/\//i.test(webAppUrl)) throw new Error("TELEGRAM_WEB_APP_URL must use HTTPS.");
 
   const endpoint = `https://api.telegram.org/bot${token}`;
@@ -71,5 +80,6 @@ export async function configureTelegramBot() {
 
   // Long polling is used for /start updates; Telegram permits either polling or a webhook.
   await telegramRequest(endpoint, "deleteWebhook", { drop_pending_updates: false });
+  console.log("Telegram bot API configured; starting long polling.");
   void startCommandPolling(endpoint, webAppUrl);
 }
