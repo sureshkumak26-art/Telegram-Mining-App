@@ -324,7 +324,7 @@ export default function App() {
         <div className="wallet-modal-grabber" />
         <div className="wallet-modal-header"><div><span className="wallet-modal-kicker">ETHEREUM MAINNET</span><h2 id="wallet-modal-title">ETH Wallet</h2></div><button className="wallet-modal-close" aria-label="Close ETH wallet" onClick={() => { setWalletOpen(false); setWalletAction(null); }}>×</button></div>
         <div className="wallet-modal-profile"><div className="user-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : (profile.firstName[0] || 'M').toUpperCase()}</div><div><strong>{profile.firstName}</strong><small>ID {profile.id}</small><b>● Active</b></div></div>
-        <div className="wallet-modal-balance"><span>TOTAL BALANCE</span><strong>{ethBalance} <em>ETH</em></strong><small>Verified Ethereum balance</small></div>
+        <div className="wallet-modal-balance"><span>TOTAL BALANCE</span><strong>{ethBalance} <em>ETH</em></strong><small>Includes promotional credit · non-withdrawable</small></div>
         <div className="wallet-modal-actions"><button onClick={() => setWalletAction('deposit')}>↓<span>Deposit</span></button><button onClick={() => setWalletAction('withdraw')}>↑<span>Withdraw</span></button><button onClick={() => document.getElementById('eth-history')?.scrollIntoView({ behavior: 'smooth' })}>◷<span>History</span></button></div>
         <div className="wallet-modal-asset"><div className="crypto-asset-icon">Ξ</div><div><strong>Ethereum</strong><small>ETH</small></div><b>{ethBalance}<small>ETH</small></b></div>
         <div className="wallet-modal-content"><CryptoWallet initData={initData} isTelegram={isTelegram} onBalanceChange={setEthBalance} action={walletAction} onActionChange={setWalletAction} /></div>
