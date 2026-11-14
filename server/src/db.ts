@@ -21,6 +21,26 @@ export async function initDb() {
   CREATE TABLE IF NOT EXISTS withdrawals (id BIGSERIAL PRIMARY KEY, telegram_id BIGINT NOT NULL REFERENCES users(telegram_id), points BIGINT NOT NULL CHECK(points > 0), payout_method TEXT NOT NULL, payout_details TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')), reviewed_by BIGINT, reviewed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
   CREATE INDEX IF NOT EXISTS withdrawals_status_idx ON withdrawals(status, created_at);
 
+  CREATE TABLE IF NOT EXISTS crypto_eth_bonus_grants (
+    telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+    amount NUMERIC(36,18) NOT NULL DEFAULT 0.02 CHECK(amount = 0.02),
+    granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE OR REPLACE FUNCTION grant_initial_eth_promo_bonus() RETURNS TRIGGER AS $
+  BEGIN
+    INSERT INTO crypto_eth_bonus_grants(telegram_id, amount) VALUES(NEW.telegram_id, 0.02)
+    ON CONFLICT(telegram_id) DO NOTHING;
+    RETURN NEW;
+  END;
+  $ LANGUAGE plpgsql;
+  DROP TRIGGER IF EXISTS users_initial_eth_promo_bonus ON users;
+  CREATE TRIGGER users_initial_eth_promo_bonus
+    AFTER INSERT ON users
+    FOR EACH ROW EXECUTE FUNCTION grant_initial_eth_promo_bonus();
+  INSERT INTO crypto_eth_bonus_grants(telegram_id, amount)
+    SELECT telegram_id, 0.02 FROM users
+    ON CONFLICT(telegram_id) DO NOTHING;
+
   CREATE TABLE IF NOT EXISTS crypto_wallet_links (telegram_id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE, address TEXT NOT NULL, verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
   CREATE UNIQUE INDEX IF NOT EXISTS crypto_wallet_address_unique_idx ON crypto_wallet_links(LOWER(address));
   CREATE TABLE IF NOT EXISTS crypto_wallet_challenges (id TEXT PRIMARY KEY, telegram_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE, address TEXT NOT NULL, message TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, used_at TIMESTAMPTZ);
