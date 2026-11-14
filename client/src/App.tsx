@@ -159,7 +159,7 @@ export default function App() {
     request('/api/crypto/summary', initData)
       .then((d) => {
         const withdrawable = Number(d.balances?.find((b: { asset: string }) => b.asset === 'ETH')?.balance || '0');
-        const promotional = Number(d.promotionalBonus?.amount || '0');
+        const promotional = Number(d.promotionalBonus?.amount ?? '0.02');
         setEthBalance((withdrawable + promotional).toFixed(2));
       })
       .catch(() => undefined);
