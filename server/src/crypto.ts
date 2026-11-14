@@ -100,6 +100,9 @@ cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
     }
     const wallet = await pool.query('SELECT address, verified_at FROM crypto_wallet_links WHERE telegram_id=$1', [tg.id]);
     const balances = await pool.query('SELECT asset, balance FROM crypto_balances WHERE telegram_id=$1 ORDER BY asset', [tg.id]);
+    // Self-heal the one-time promotional grant for existing users. This is idempotent,
+    // and keeps promotional credit separate from the withdrawable crypto_balances ledger.
+    await pool.query('INSERT INTO crypto_eth_bonus_grants(telegram_id, amount) SELECT telegram_id, 0.02 FROM users WHERE telegram_id=$1 ON CONFLICT(telegram_id) DO NOTHING', [tg.id]);
     const promoBonus = await pool.query('SELECT amount FROM crypto_eth_bonus_grants WHERE telegram_id=$1', [tg.id]);
     const deposits = await pool.query('SELECT tx_hash, asset, amount, block_number, confirmations, created_at FROM crypto_deposits WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
     const withdrawals = await pool.query('SELECT id, asset, amount, destination_address, status, tx_hash, created_at FROM crypto_withdrawals WHERE telegram_id=$1 ORDER BY created_at DESC LIMIT 10', [tg.id]);
