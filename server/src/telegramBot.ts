@@ -42,7 +42,7 @@ async function startCommandPolling(endpoint: string, webAppUrl: string) {
         const messageText = typeof message?.text === "string" ? message.text.trim() : "";
         if (!message?.chat?.id || !/^\/(?:start|help)(?:@\w+)?(?:\s|$)/i.test(messageText)) continue;
 
-        console.log(`Telegram command received: ${messageText.split(/\\s/)[0]}`);
+        console.log(`Telegram command received: ${messageText.split(/\s/)[0]}`);
         await telegramRequest(endpoint, "sendMessage", {
           chat_id: message.chat.id,
           text: welcomeMessage,
