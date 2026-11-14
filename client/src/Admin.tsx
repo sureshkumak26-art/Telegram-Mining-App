@@ -47,7 +47,6 @@ export default function Admin() {
   const [adminQr, setAdminQr] = useQrState('');
   const [depositAddress, setDepositAddress] = useState('');
   const [depositAddressesText, setDepositAddressesText] = useState('');
-  const [manualQr, setManualQr] = useState('');
   const [savingAddress, setSavingAddress] = useState(false);
   const [taskConfigs, setTaskConfigs] = useState<TaskConfig[]>([]);
   const [savingTask, setSavingTask] = useState('');
@@ -71,14 +70,12 @@ export default function Admin() {
   useEffect(() => {
     if (dashboard?.settings?.ethereumTreasuryAddress) setDepositAddress(dashboard.settings.ethereumTreasuryAddress);
     if (dashboard?.settings?.ethereumDepositAddresses) setDepositAddressesText(dashboard.settings.ethereumDepositAddresses.join('\n'));
-    if (dashboard?.settings?.ethereumDepositQr !== undefined) setManualQr(dashboard.settings.ethereumDepositQr || '');
   }, [dashboard?.settings?.ethereumTreasuryAddress, dashboard?.settings?.ethereumDepositAddresses]);
   useQrEffect(() => {
     const address = dashboard?.settings.ethereumTreasuryAddress;
     if (!address) { setAdminQr(''); return; }
-    if (manualQr) { setAdminQr(manualQr); return; }
     QRCode.toDataURL(`ethereum:${address}`, { width: 220, margin: 1, errorCorrectionLevel: 'M' }).then(setAdminQr).catch(() => setAdminQr(''));
-  }, [dashboard?.settings.ethereumTreasuryAddress, manualQr]);
+  }, [dashboard?.settings.ethereumTreasuryAddress]);
   async function copyDepositAddress() {
     const address = dashboard?.settings?.ethereumTreasuryAddress;
     if (!address) return;
@@ -88,17 +85,12 @@ export default function Admin() {
     if (!adminQr) return;
     const link = document.createElement('a'); link.href = adminQr; link.download = 'ethereum-deposit-qr.png'; link.click();
   }
-  function handleQrUpload(file?: File) {
-    if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 500000) { setError('Upload a PNG, JPEG, or WebP QR image under 500 KB.'); return; }
-    const reader = new FileReader(); reader.onload = () => setManualQr(typeof reader.result === 'string' ? reader.result : ''); reader.readAsDataURL(file);
-  }
+
   async function saveDepositAddress() {
     setSavingAddress(true); setError('');
     try {
       const addresses = depositAddressesText.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
       const saved = await api('/api/admin/settings', 'PATCH', { ethereumDepositAddresses: addresses });
-      setManualQr('');
       setDashboard(current => current ? { ...current, settings: { ...current.settings, ethereumTreasuryAddress: saved.ethereumDepositAddress, ethereumDepositAddresses: saved.ethereumDepositAddresses, ethereumDepositQr: null } } : current);
       setError('');
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save deposit addresses'); }
@@ -178,7 +170,7 @@ export default function Admin() {
           {tab === 'overview' && <>
             <div className="admin-referral-settings"><div><span className="admin-kicker">REFERRAL PROGRAM</span><h3>Invite rewards</h3><p>Configure the one-time reward paid to the inviter after a new Telegram user joins.</p></div><label className="admin-task-reward">PRIZE<input type="number" min="0" step="0.01" value={referralSettings.reward} onChange={e => setReferralSettings(current => ({ ...current, reward: Number(e.target.value) }))}/><small>points</small></label><label className="admin-task-toggle"><input type="checkbox" checked={referralSettings.enabled} onChange={e => setReferralSettings(current => ({ ...current, enabled: e.target.checked }))}/><span>{referralSettings.enabled ? 'ON' : 'OFF'}</span></label><button className="admin-approve" disabled={savingReferral} onClick={() => void saveReferralSettings()}>{savingReferral ? 'Saving…' : 'Save'}</button></div>
             <div className="admin-task-settings"><div className="admin-section-head"><div><h3>Task rewards</h3><p>Enable missions, change icons, destinations, and point prizes.</p></div><span className="admin-count">{taskConfigs.filter(t => t.enabled).length} enabled</span></div>{taskConfigs.map(task => <div className="admin-task-row" key={task.id}><div className="admin-task-icon-wrap">{task.icon.startsWith('data:image/') || task.icon.startsWith('http') ? <img className="admin-task-icon" src={task.icon} alt="" /> : <span className="admin-task-icon">{task.icon}</span>}<label className="admin-task-upload">Select image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleTaskIconUpload(task.id, e.target.files?.[0])}/></label><input className="admin-task-icon-url" value={task.icon.startsWith('http') ? task.icon : ''} aria-label="HTTPS task icon URL" placeholder="or HTTPS icon URL" onChange={e => setTaskConfigs(current => current.map(item => item.id === task.id ? { ...item, icon: e.target.value } : item))}/></div><div className="admin-task-fields"><input className="admin-search" value={task.title} onChange={e => setTaskConfigs(current => current.map(item => item.id === task.id ? { ...item, title: e.target.value } : item))}/><input className="admin-search" value={task.url} onChange={e => setTaskConfigs(current => current.map(item => item.id === task.id ? { ...item, url: e.target.value } : item))}/></div><label className="admin-task-reward">PRIZE<input type="number" min="0" step="0.01" value={task.reward} onChange={e => setTaskConfigs(current => current.map(item => item.id === task.id ? { ...item, reward: Number(e.target.value) } : item))}/><small>points</small></label><label className="admin-task-toggle"><input type="checkbox" checked={task.enabled} onChange={e => setTaskConfigs(current => current.map(item => item.id === task.id ? { ...item, enabled: e.target.checked } : item))}/><span>{task.enabled ? 'ON' : 'OFF'}</span></label><button className="admin-approve" disabled={savingTask === task.id} onClick={() => void saveTask(task)}>{savingTask === task.id ? 'Saving…' : 'Save'}</button></div>)}</div>
-            <div className="admin-deposit-settings"><div><span className="admin-kicker">ETHEREUM MAINNET</span><h3>Deposit address</h3><p>Add public Ethereum addresses, one per line. The active address rotates every 30 minutes. Never enter a private key.</p><textarea className="admin-search" rows={4} value={depositAddressesText} onChange={e => setDepositAddressesText(e.target.value)} placeholder={'0x… public Ethereum address\n0x… second address\n0x… third address'} /><label className="admin-upload-label">Manual QR image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleQrUpload(e.target.files?.[0])} /></label><div className="admin-setting-actions"><button className="admin-approve admin-save-setting" disabled={savingAddress || !depositAddress.trim()} onClick={() => void saveDepositAddress()}>{savingAddress ? 'Saving…' : 'Save address list'}</button><button className="admin-refresh" disabled={!dashboard?.settings?.ethereumTreasuryAddress} onClick={() => void copyDepositAddress()}>Copy address</button><button className="admin-refresh" disabled={!adminQr} onClick={downloadDepositQr}>Download QR</button><button className="admin-refresh" disabled={!dashboard?.settings?.ethereumTreasuryAddress} onClick={() => setDepositAddress('')}>Change QR address</button></div></div>{adminQr ? <img src={adminQr} alt="Ethereum deposit QR code" /> : <span className="admin-qr-empty">QR is generated for the currently active address.</span>}</div>
+            <div className="admin-deposit-settings"><div><span className="admin-kicker">ETHEREUM MAINNET</span><h3>Deposit address</h3><p>Add public Ethereum addresses, one per line. The active address rotates every 30 minutes. Never enter a private key.</p><textarea className="admin-search" rows={4} value={depositAddressesText} onChange={e => setDepositAddressesText(e.target.value)} placeholder={'0x… public Ethereum address\n0x… second address\n0x… third address'} /><div className="admin-setting-actions"><button className="admin-approve admin-save-setting" disabled={savingAddress || !depositAddressesText.trim()} onClick={() => void saveDepositAddress()}>{savingAddress ? 'Saving…' : 'Save address list'}</button><button className="admin-refresh" disabled={!dashboard?.settings?.ethereumTreasuryAddress} onClick={() => void copyDepositAddress()}>Copy address</button><button className="admin-refresh" disabled={!adminQr} onClick={downloadDepositQr}>Download QR</button></div></div>{adminQr ? <img src={adminQr} alt="Ethereum deposit QR code" /> : <span className="admin-qr-empty">QR is generated for the currently active address.</span>}</div>
             <div className="admin-stat-grid">
               <article className="admin-stat"><span>REGISTERED USERS</span><strong>{number(stats!.totalUsers)}</strong><small>All accounts</small><i>♙</i></article>
               <article className="admin-stat"><span>VIRTUAL POINTS</span><strong>{number(stats!.totalPoints)}</strong><small>Current user balances</small><i>◈</i></article>
