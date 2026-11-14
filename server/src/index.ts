@@ -74,7 +74,7 @@ app.post('/api/tap', telegramAuth, async (req, res, next) => {
     }
     if (Number(u.energy) < 1) { await client.query('ROLLBACK'); return res.status(429).json({ error: 'No taps left. Your 5-hour reset is still running.', resetAt: u.energy_reset_at }); }
     const acceptedCount = Math.min(count, Number(u.energy));
-    const earned = (acceptedCount * 0.08).toFixed(2);
+    const earned = (acceptedCount * 0.008).toFixed(3);
     const updated = await client.query(`UPDATE users SET points=points+$2::numeric, energy=energy-$3, taps=taps+$3, energy_reset_at=CASE WHEN energy <= $3 THEN NOW()+INTERVAL '5 hours' ELSE energy_reset_at END, updated_at=NOW() WHERE telegram_id=$1 RETURNING telegram_id, first_name, username, photo_url, points, energy, taps, energy_reset_at`, [tg.id, earned, acceptedCount]);
     await client.query('INSERT INTO ledger(telegram_id, delta, reason) VALUES($1,$2,$3)', [tg.id, earned, `tap-batch:${acceptedCount}`]);
     await client.query('COMMIT');
