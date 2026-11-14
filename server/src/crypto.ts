@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { Interface, JsonRpcProvider, formatUnits, getAddress, isAddress, parseUnits, verifyMessage } from 'ethers';
-import { getSetting, pool } from './db.js';
+import { getSetting, pool, setSetting } from './db.js';
 import { adminAuth, telegramAuth, getTelegramUser } from './telegram.js';
 
 export const cryptoRouter = Router();
@@ -52,6 +52,15 @@ function requireAdmin(req: Request, res: Response) {
   return true;
 }
 const DEPOSIT_ROTATION_MS = 30 * 60 * 1000;
+async function depositRotationState() {
+  let startedAt = Date.parse((await getSetting('ethereum_deposit_rotation_started_at')) || '');
+  if (!Number.isFinite(startedAt)) {
+    startedAt = Date.now();
+    await setSetting('ethereum_deposit_rotation_started_at', new Date(startedAt).toISOString());
+  }
+  const slot = Math.max(0, Math.floor((Date.now() - startedAt) / DEPOSIT_ROTATION_MS));
+  return { slot, nextAt: new Date(startedAt + (slot + 1) * DEPOSIT_ROTATION_MS).toISOString() };
+}
 async function config() {
   const savedPool = await getSetting('ethereum_deposit_addresses');
   const savedAddress = await getSetting('ethereum_deposit_address');
@@ -65,9 +74,9 @@ async function config() {
     if (isAddress(legacy)) configuredAddresses = [getAddress(legacy)];
   }
   configuredAddresses = [...new Set(configuredAddresses)];
-  const slot = Math.floor(Date.now() / DEPOSIT_ROTATION_MS);
-  const treasury = configuredAddresses.length ? configuredAddresses[slot % configuredAddresses.length] : '';
-  const depositRotationAt = new Date((slot + 1) * DEPOSIT_ROTATION_MS).toISOString();
+  const rotation = await depositRotationState();
+  const treasury = configuredAddresses.length ? configuredAddresses[rotation.slot % configuredAddresses.length] : '';
+  const depositRotationAt = rotation.nextAt;
   const usdcRaw = process.env.ETHEREUM_USDC_CONTRACT || '';
   const usdc = isAddress(usdcRaw) ? getAddress(usdcRaw) : '';
   return { treasury, treasuryAddresses: configuredAddresses, depositRotationAt, usdc, rpcUrl: process.env.ETHEREUM_RPC_URL || '' };
