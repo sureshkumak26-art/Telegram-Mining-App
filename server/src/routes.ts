@@ -60,7 +60,7 @@ async function configuredDepositAddresses(): Promise<string[]> {
   let addresses: string[] = [];
   try {
     const parsed = savedPool ? JSON.parse(savedPool) : [];
-    if (Array.isArray(parsed)) addresses = parsed.filter((value): value is string => typeof value === 'string' && isAddress(value)).map(getAddress);
+    if (Array.isArray(parsed)) addresses = parsed.filter((value): value is string => typeof value === 'string' && isAddress(value)).map(value => getAddress(value));
   } catch { /* Use the legacy single-address setting below. */ }
   if (!addresses.length) {
     const legacy = (await getSetting('ethereum_deposit_address')) || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS || '';
