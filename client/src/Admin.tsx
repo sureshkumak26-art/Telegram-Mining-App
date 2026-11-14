@@ -25,7 +25,7 @@ type Ledger = { id: number; telegram_id: string; delta: number; reason: string; 
 type CryptoWithdrawal = { id: number; telegram_id: string; asset: string; amount: string; fee?: string; destination_address: string; status: string; txHash: string | null; created_at: string };
 type WithdrawalSchedule = { startAt: string; endAt: string; override: 'auto' | 'on' | 'off'; open?: boolean; message?: string; nextTransitionAt?: string | null; timezone?: string };
 type TaskConfig = { id: string; title: string; description: string; url: string; icon: string; reward: number; enabled: boolean };
-type Dashboard = { settings: { ethereumTreasuryAddress: string | null; ethereumDepositAddresses?: string[]; ethereumDepositQr: string | null; network: string; rotationMinutes?: number };  cryptoWithdrawals: CryptoWithdrawal[]; stats: { totalUsers: number; totalPoints: number; totalTaps: number; active24h: number; pendingWithdrawals: number; totalDeposits: string; totalWithdrawals: string }; users: User[]; ledger: Ledger[]; withdrawals: Withdrawal[] };
+type Dashboard = { settings: { ethereumTreasuryAddress: string | null; ethereumDepositAddresses?: string[]; ethereumDepositQr: string | null; depositRotationAt?: string; network: string; rotationMinutes?: number };  cryptoWithdrawals: CryptoWithdrawal[]; stats: { totalUsers: number; totalPoints: number; totalTaps: number; active24h: number; pendingWithdrawals: number; totalDeposits: string; totalWithdrawals: string }; users: User[]; ledger: Ledger[]; withdrawals: Withdrawal[] };
 async function api(path: string, method = 'GET', body?: unknown) {
   const initData = getTelegramInitData();
   if (!initData) throw new Error('Open this admin page from your Telegram bot menu.');
@@ -67,6 +67,18 @@ export default function Admin() {
   }
   useEffect(() => { if (!telegramAdmin) { setLoading(false); return; } void refresh(); void api('/api/admin/tasks').then(d => setTaskConfigs(d.tasks || [])).catch(() => undefined); void api('/api/admin/referral-settings').then(setReferralSettings).catch(() => undefined); void api('/api/admin/crypto/withdrawal-settings').then(setWithdrawalSchedule).catch(() => undefined); }, []);
   useEffect(() => { const timer = window.setInterval(() => setClockNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => {
+    const rotationAt = dashboard?.settings?.depositRotationAt;
+    if (!rotationAt) return;
+    let inFlight = false;
+    const timer = window.setInterval(() => {
+      if (!inFlight && Date.now() >= Date.parse(rotationAt)) {
+        inFlight = true;
+        void refresh().finally(() => { inFlight = false; });
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [dashboard?.settings?.depositRotationAt]);
   useEffect(() => {
     if (dashboard?.settings?.ethereumTreasuryAddress) setDepositAddress(dashboard.settings.ethereumTreasuryAddress);
     if (dashboard?.settings?.ethereumDepositAddresses) setDepositAddressesText(dashboard.settings.ethereumDepositAddresses.join('\n'));
