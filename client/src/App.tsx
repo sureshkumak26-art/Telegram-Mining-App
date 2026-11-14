@@ -237,7 +237,7 @@ export default function App() {
       const stillQueued = pendingTaps.current;
       const energy = Math.max(0, Number(d.profile.energy) - stillQueued);
       const resetAt = energy === 0 ? (d.profile.resetAt || new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : d.profile.resetAt;
-      const nextProfile = { ...d.profile, points: Math.round((Number(d.profile.points) + stillQueued * 0.02) * 100) / 100, energy, taps: Number(d.profile.taps) + stillQueued, resetAt };
+      const nextProfile = { ...d.profile, points: Math.round((Number(d.profile.points) + stillQueued * 0.08) * 100) / 100, energy, taps: Number(d.profile.taps) + stillQueued, resetAt };
       visibleEnergy.current = energy;
       setProfile(nextProfile);
     } catch (e) {
@@ -245,7 +245,7 @@ export default function App() {
       setProfile(p => {
         const energy = Math.min(p.maxEnergy, p.energy + count);
         visibleEnergy.current = Math.min(p.maxEnergy, visibleEnergy.current + count);
-        return { ...p, points: Math.max(0, Math.round((p.points - count * 0.02) * 100) / 100), energy, taps: Math.max(0, p.taps - count), resetAt: energy > 0 ? null : p.resetAt };
+        return { ...p, points: Math.max(0, Math.round((p.points - count * 0.08) * 100) / 100), energy, taps: Math.max(0, p.taps - count), resetAt: energy > 0 ? null : p.resetAt };
       });
       setNotice(e instanceof Error ? e.message : 'Tap failed. Please try again.');
     } finally {
@@ -268,7 +268,7 @@ export default function App() {
     setProfile(p => {
       if (p.energy < 1) return p;
       const energy = Math.max(0, p.energy - 1);
-      return { ...p, points: Math.round((p.points + 0.02) * 100) / 100, energy, taps: p.taps + 1, resetAt: energy === 0 ? (p.resetAt && new Date(p.resetAt).getTime() > Date.now() ? p.resetAt : new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : p.resetAt };
+      return { ...p, points: Math.round((p.points + 0.08) * 100) / 100, energy, taps: p.taps + 1, resetAt: energy === 0 ? (p.resetAt && new Date(p.resetAt).getTime() > Date.now() ? p.resetAt : new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString()) : p.resetAt };
     });
     if (!isTelegram) return;
     setNotice('');
@@ -287,12 +287,12 @@ export default function App() {
       {tab === 'tap' && <>
         <section className="user-strip"><div className="user-avatar">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : (profile.firstName[0] || 'M').toUpperCase()}</div><div className="user-name"><strong>{profile.firstName}</strong><small>{profile.username ? '@'+profile.username : 'Telegram Miner'}</small></div><button className="wallet-chip points-chip" aria-label="Open ETH wallet" aria-haspopup="dialog" onClick={() => setWalletOpen(true)}>Ξ <span>ETH WALLET<br/><b>{ethBalance} ETH</b></span> ›</button></section>
         <section className="tap-balance"><div className="balance-number">{profile.points.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span>HYPERLIQUID</span></div><div className="balance-usd">{hypePrice === null ? "Loading live USD value…" : `≈ ${(profile.points * hypePrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}</div><div className="balance-rate">{hypePrice === null ? "Live HYPE price unavailable" : `Live HYPE price: ${hypePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USD · updates every 60 sec`}</div></section>
-        <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.02 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.02</div></section>
+        <section className="coin-stage" role="button" tabIndex={0} aria-label="Tap the Hyperliquid mining coin to earn 0.08 points" onClick={tap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } }}><div className="coin-glow"/><div className="coin-ring"><div className="coin-inner"><div className="logo-symbol"><i/><i/><i/><i/></div></div></div><div key={tapAnimation} className={`tap-plus${tapAnimation > 0 ? ' animate' : ''}`}>+0.08</div></section>
         <button type="button" className="tap-cta" onClick={tap} onPointerDown={event => { if (event.pointerType === 'touch') event.preventDefault(); }} disabled={!profileReady || profile.energy < 1}>{!profileReady ? 'Loading balance…' : profile.energy < 1 ? '⏳  Resetting…' : busy ? '✦  Tap to mine · syncing' : '✦  Tap to mine'}</button>
         <section className="meters"><div className="meter"><span>⚡</span><b>{profile.energy}/{profile.maxEnergy}</b><small>TAPS LEFT</small></div><div className="meter"><span>⌛</span><b>{profile.energy === 0 ? resetCountdown : 'READY'}</b><small>RESET TIMER (H:M:S)</small></div></section>
         {profile.energy === 0 && <p className="fine-print">Tap limit reached. Energy refills when the countdown reaches 00:00:00.</p>}
         <div className="energy-track"><div style={{width:`${Math.min(100,profile.energy/Math.max(1,profile.maxEnergy)*100)}%`}}/></div>
-        <p className="fine-print">Each tap earns 0.02 virtual points. 1,000 taps per cycle; full reset after 5 hours. Points have no guaranteed cash value.</p>
+        <p className="fine-print">Each tap earns 0.08 virtual points. 1,000 taps per cycle; full reset after 5 hours. Points have no guaranteed cash value.</p>
       </>}
       {tab === 'refer' && <>
         <h1 className="page-heading">Refer &amp; Earn</h1><p className="page-subtitle">Invite friends and grow together</p>
