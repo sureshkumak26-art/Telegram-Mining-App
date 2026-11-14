@@ -51,13 +51,26 @@ function requireAdmin(req: Request, res: Response) {
   if (!adminIds().has(String(getTelegramUser(req).id))) { res.status(403).json({ error: 'Admin access required.' }); return false; }
   return true;
 }
+const DEPOSIT_ROTATION_MS = 30 * 60 * 1000;
 async function config() {
+  const savedPool = await getSetting('ethereum_deposit_addresses');
   const savedAddress = await getSetting('ethereum_deposit_address');
-  const treasuryRaw = savedAddress || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS || '';
-  const treasury = isAddress(treasuryRaw) ? getAddress(treasuryRaw) : '';
+  let configuredAddresses: string[] = [];
+  try {
+    const parsed = savedPool ? JSON.parse(savedPool) : [];
+    if (Array.isArray(parsed)) configuredAddresses = parsed.filter((value): value is string => typeof value === 'string' && isAddress(value)).map(getAddress);
+  } catch { /* Fall back to the legacy single-address setting. */ }
+  if (!configuredAddresses.length) {
+    const legacy = savedAddress || process.env.ETHEREUM_DEPOSIT_ADDRESS || process.env.ETHEREUM_TREASURY_ADDRESS || '';
+    if (isAddress(legacy)) configuredAddresses = [getAddress(legacy)];
+  }
+  configuredAddresses = [...new Set(configuredAddresses)];
+  const slot = Math.floor(Date.now() / DEPOSIT_ROTATION_MS);
+  const treasury = configuredAddresses.length ? configuredAddresses[slot % configuredAddresses.length] : '';
+  const depositRotationAt = new Date((slot + 1) * DEPOSIT_ROTATION_MS).toISOString();
   const usdcRaw = process.env.ETHEREUM_USDC_CONTRACT || '';
   const usdc = isAddress(usdcRaw) ? getAddress(usdcRaw) : '';
-  return { treasury, usdc, rpcUrl: process.env.ETHEREUM_RPC_URL || '' };
+  return { treasury, treasuryAddresses: configuredAddresses, depositRotationAt, usdc, rpcUrl: process.env.ETHEREUM_RPC_URL || '' };
 }
 async function provider() {
   const c = await config();
@@ -85,7 +98,7 @@ cryptoRouter.get('/crypto/public-config', async (_req, res, next) => {
     const c = await config();
     const qrDataUrl = await getSetting('ethereum_deposit_qr');
     const configured = Boolean(c.rpcUrl && c.treasury);
-    res.json({ network: 'Ethereum Mainnet', chainId: 1, withdrawalAvailability: await withdrawalAvailability(), configured, configurationMessage: configured ? '' : 'RPC is required only for transaction verification.', treasuryAddress: c.treasury || null, qrDataUrl: qrDataUrl || null, usdcEnabled: false, confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, minimumWithdrawalEth: minimumWithdrawalEth(), wallet: null, balances: [], deposits: [], withdrawals: [] });
+    res.json({ network: 'Ethereum Mainnet', chainId: 1, withdrawalAvailability: await withdrawalAvailability(), configured, configurationMessage: configured ? '' : 'RPC is required only for transaction verification.', treasuryAddress: c.treasury || null, treasuryAddresses: c.treasuryAddresses, depositRotationAt: c.depositRotationAt, qrDataUrl: qrDataUrl || null, usdcEnabled: false, confirmationsRequired: CONFIRMATIONS_REQUIRED, withdrawalFeeEth: HYPERLIQUID_WITHDRAWAL_FEE_ETH, minimumWithdrawalEth: minimumWithdrawalEth(), wallet: null, balances: [], deposits: [], withdrawals: [] });
   } catch (e) { next(e); }
 });
 cryptoRouter.get('/crypto/summary', telegramAuth, async (req, res, next) => {
@@ -169,14 +182,14 @@ cryptoRouter.post('/crypto/deposits/verify', telegramAuth, async (req, res, next
     if (confirmations < CONFIRMATIONS_REQUIRED) return res.status(409).json({ error: `Only ${confirmations} confirmations. Wait for ${CONFIRMATIONS_REQUIRED} confirmations and retry.`, confirmations, required: CONFIRMATIONS_REQUIRED });
     let rawAmount = 0n;
     if (asset === 'ETH') {
-      if (!tx.to || getAddress(tx.to) !== c.treasury) return res.status(400).json({ error: 'This ETH transaction was not sent to the configured deposit address.' });
+      if (!tx.to || !c.treasuryAddresses.includes(getAddress(tx.to))) return res.status(400).json({ error: 'This ETH transaction was not sent to one of the configured deposit addresses.' });
       rawAmount = tx.value;
     } else {
       for (const log of receipt.logs) {
         if (getAddress(log.address) !== c.usdc) continue;
         try {
           const parsed = ERC20.parseLog({ topics: [...log.topics], data: log.data });
-          if (parsed?.name === 'Transfer' && getAddress(parsed.args.from) === sender && getAddress(parsed.args.to) === c.treasury) rawAmount += parsed.args.value as bigint;
+          if (parsed?.name === 'Transfer' && getAddress(parsed.args.from) === sender && c.treasuryAddresses.includes(getAddress(parsed.args.to))) rawAmount += parsed.args.value as bigint;
         } catch { /* Ignore logs that are not the standard ERC-20 Transfer event. */ }
       }
     }
