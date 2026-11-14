@@ -37,7 +37,9 @@ export default function CryptoWallet({ initData, isTelegram, onBalanceChange, ac
       const endpoint = isTelegram ? '/api/crypto/summary' : '/api/crypto/public-config';
       const summary = await api(endpoint, initData) as Summary;
       setData(summary);
-      onBalanceChange?.(summary.balances.find(b => b.asset === 'ETH')?.balance || '0');
+      const withdrawable = Number(summary.balances.find(b => b.asset === 'ETH')?.balance || '0');
+      const promotional = Number(summary.promotionalBonus?.amount || '0');
+      onBalanceChange?.((withdrawable + promotional).toFixed(2));
     }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not load crypto wallet'); }
   }
