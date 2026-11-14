@@ -45,7 +45,6 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<number | null>(null);
   const [adminQr, setAdminQr] = useQrState('');
-  const [depositAddress, setDepositAddress] = useState('');
   const [depositAddressesText, setDepositAddressesText] = useState('');
   const [savingAddress, setSavingAddress] = useState(false);
   const [taskConfigs, setTaskConfigs] = useState<TaskConfig[]>([]);
@@ -80,7 +79,6 @@ export default function Admin() {
     return () => window.clearInterval(timer);
   }, [dashboard?.settings?.depositRotationAt]);
   useEffect(() => {
-    if (dashboard?.settings?.ethereumTreasuryAddress) setDepositAddress(dashboard.settings.ethereumTreasuryAddress);
     if (dashboard?.settings?.ethereumDepositAddresses) setDepositAddressesText(dashboard.settings.ethereumDepositAddresses.join('\n'));
   }, [dashboard?.settings?.ethereumTreasuryAddress, dashboard?.settings?.ethereumDepositAddresses]);
   useQrEffect(() => {
