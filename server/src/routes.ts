@@ -68,16 +68,24 @@ async function configuredDepositAddresses(): Promise<string[]> {
   }
   return [...new Set(addresses)];
 }
-function activeDepositAddress(addresses: string[]) {
-  if (!addresses.length) return null;
-  const slot = Math.floor(Date.now() / DEPOSIT_ADDRESS_ROTATION_MS);
-  return addresses[slot % addresses.length];
+async function depositRotationState() {
+  let startedAt = Date.parse((await getSetting('ethereum_deposit_rotation_started_at')) || '');
+  if (!Number.isFinite(startedAt)) {
+    startedAt = Date.now();
+    await setSetting('ethereum_deposit_rotation_started_at', new Date(startedAt).toISOString());
+  }
+  const slot = Math.max(0, Math.floor((Date.now() - startedAt) / DEPOSIT_ADDRESS_ROTATION_MS));
+  return { slot, nextAt: new Date(startedAt + (slot + 1) * DEPOSIT_ADDRESS_ROTATION_MS).toISOString() };
+}
+function activeDepositAddress(addresses: string[], slot: number) {
+  return addresses.length ? addresses[slot % addresses.length] : null;
 }
 gameRouter.get('/admin/settings', adminAuth, async (req, res, next) => {
   try {
     if (!requireAdmin(req, res)) return;
     const addresses = await configuredDepositAddresses();
-    res.json({ ethereumDepositAddress: activeDepositAddress(addresses), ethereumDepositAddresses: addresses });
+    const rotation = await depositRotationState();
+    res.json({ ethereumDepositAddress: activeDepositAddress(addresses, rotation.slot), ethereumDepositAddresses: addresses, depositRotationAt: rotation.nextAt, rotationMinutes: 30 });
   } catch (e) { next(e); }
 });
 
@@ -93,9 +101,10 @@ gameRouter.patch('/admin/settings', adminAuth, async (req, res, next) => {
     const addresses = [...new Set([...(await configuredDepositAddresses()), ...candidates.map((value: string) => getAddress(value.trim()))])];
     await setSetting('ethereum_deposit_addresses', JSON.stringify(addresses));
     await setSetting('ethereum_deposit_address', addresses[0]);
+    const rotation = await depositRotationState();
     // A manually uploaded QR would become stale as soon as the address rotates.
     await setSetting('ethereum_deposit_qr', '');
-    res.json({ ok: true, ethereumDepositAddress: activeDepositAddress(addresses), ethereumDepositAddresses: addresses, rotationMinutes: 30 });
+    res.json({ ok: true, ethereumDepositAddress: activeDepositAddress(addresses, rotation.slot), ethereumDepositAddresses: addresses, depositRotationAt: rotation.nextAt, rotationMinutes: 30 });
   } catch (e) { next(e); }
 });
 
@@ -111,13 +120,15 @@ gameRouter.get('/admin/dashboard', adminAuth, async (req, res, next) => {
       pool.query(`SELECT COALESCE((SELECT SUM(amount) FROM crypto_deposits WHERE asset='ETH'),0)::text AS deposits, COALESCE((SELECT SUM(amount) FROM crypto_withdrawals WHERE asset='ETH' AND status IN ('approved','completed')),0)::text AS withdrawals, COUNT(*) FILTER (WHERE status='pending')::int AS pending_crypto FROM crypto_withdrawals`)
     ]);
     const s = stats.rows[0];
+    const depositAddresses = await configuredDepositAddresses();
+    const depositRotation = await depositRotationState();
     res.json({
       stats: { totalUsers: Number(s.total_users), totalPoints: Number(s.total_points), totalTaps: Number(s.total_taps), active24h: Number(s.active_24h), pendingWithdrawals: (withdrawals.rowCount || 0) + Number(cryptoStats.rows[0].pending_crypto || 0), totalDeposits: String(cryptoStats.rows[0].deposits), totalWithdrawals: String(cryptoStats.rows[0].withdrawals) },
       users: users.rows.map(u => ({ ...u, telegram_id: String(u.telegram_id), points: Number(u.points), taps: Number(u.taps), energy: Number(u.energy) })),
       ledger: ledger.rows.map(l => ({ ...l, telegram_id: String(l.telegram_id), delta: Number(l.delta) })),
       withdrawals: withdrawals.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), points: Number(w.points) })),
       cryptoWithdrawals: cryptoWithdrawals.rows.map(w => ({ ...w, telegram_id: String(w.telegram_id), amount: String(w.amount), fee: w.asset === 'ETH' ? '0.02' : '0', txHash: w.tx_hash })),
-      settings: { ethereumTreasuryAddress: activeDepositAddress(await configuredDepositAddresses()), ethereumDepositAddresses: await configuredDepositAddresses(), ethereumDepositQr: null, network: 'Ethereum Mainnet', rotationMinutes: 30 }
+      settings: { ethereumTreasuryAddress: activeDepositAddress(depositAddresses, depositRotation.slot), ethereumDepositAddresses: depositAddresses, ethereumDepositQr: null, depositRotationAt: depositRotation.nextAt, network: 'Ethereum Mainnet', rotationMinutes: 30 }
     });
   } catch (e) { next(e); }
 });
